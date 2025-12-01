@@ -163,7 +163,7 @@ class LeanVerificationServer:
         """Set the current categorical theory."""
         if theory_name in self.theory_registry.theories:
             self.current_theory = self.theory_registry.theories[theory_name]
-            print(f"📐 Theory set: {theory_name} ({self.current_theory.framework.value})")
+            print(f" Theory set: {theory_name} ({self.current_theory.framework.value})")
         else:
             print(f"Theory '{theory_name}' not found")
     
