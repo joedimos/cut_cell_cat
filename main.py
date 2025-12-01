@@ -10,14 +10,13 @@ try:
     def test_installation():
         """Test if all dependencies are available"""
         print("Testing installation...")
+
         
-        # Test numpy
         test_array = np.array([1, 2, 3])
         print("✓ NumPy working")
-        
-        # Test our classes
+    
         try:
-            # Try to create a simple simulator instance
+        
             sim = VerifiedCategoricalSimulator(resolution=10)
             print("✓ Verified simulator initialized")
             return True
