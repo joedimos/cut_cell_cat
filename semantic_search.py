@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 
 class SemanticPatternSearch:
-    """Enhanced semantic search over simulation patterns and categorical structures."""
+   
     
     def __init__(self):
         self.pattern_embeddings = {}
@@ -13,7 +13,7 @@ class SemanticPatternSearch:
     def add_pattern(self, pattern_id: str, pattern_data: Dict[str, Any], 
                    description: str = ""):
         """Add a pattern to the searchable database."""
-        # Create a comprehensive embedding based on pattern features
+        
         embedding = self._compute_pattern_embedding(pattern_data, description)
         
         self.pattern_database.append({
@@ -29,7 +29,7 @@ class SemanticPatternSearch:
         """Compute comprehensive embedding vector for a pattern."""
         features = []
         
-        # Extract numerical features from pattern data
+      
         if 'gradient' in pattern_data:
             features.extend([pattern_data['gradient'], pattern_data.get('average_gradient', 0)])
         if 'composition_value' in pattern_data:
