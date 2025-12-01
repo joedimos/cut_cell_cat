@@ -10,24 +10,24 @@ import numpy as np
 
 class CategoryTheoryFramework(Enum):
     """Categorical frameworks for verification."""
-    CUT_CELL = "cut_cell"  # Finite volume cut-cell methods
-    STRUCTURED_COSPAN = "structured_cospan"  # Stock-flow diagrams
-    PETRI_NET = "petri_net"  # Chemical reaction networks
-    DOUBLE_PUSHOUT = "double_pushout"  # Graph rewriting
-    OPERAD = "operad"  # Compositional systems
+    CUT_CELL = "cut_cell"  
+    STRUCTURED_COSPAN = "structured_cospan" 
+    PETRI_NET = "petri_net"  
+    DOUBLE_PUSHOUT = "double_pushout"  
+    OPERAD = "operad" 
 
 @dataclass
 class CategoryTheorySignature:
     """Semantic signature for categorical theories."""
     framework: CategoryTheoryFramework
-    objects: List[str]  # Objects in the category
-    morphisms: List[Tuple[str, str, str]]  # (name, source, target)
-    composition_laws: List[str]  # Laws that must hold
-    conservation_properties: List[str]  # What must be conserved
+    objects: List[str]  
+    morphisms: List[Tuple[str, str, str]] 
+    composition_laws: List[str]  
+    conservation_properties: List[str] 
     
     def semantic_distance(self, other: 'CategoryTheorySignature') -> float:
         """Calculate semantic similarity between theories."""
-        # Framework compatibility
+        
         framework_score = 1.0 if self.framework == other.framework else 0.5
         
         # Object overlap
@@ -147,16 +147,16 @@ class LeanVerificationServer:
         if not self.mock_mode:
             lean_available = self._quick_lean_test()
             if lean_available:
-                print("🎉 SUCCESS: REAL Lean Integration Activated!")
+                print("SUCCESS: REAL Lean Integration Activated!")
                 print("   Category theory verification enabled")
                 self.mock_mode = False
             else:
-                print("💤 Falling back to enhanced verification")
+                print("Falling back to enhanced verification")
                 self.mock_mode = True
         else:
-            print("⚙️ Using mock mode")
+            print("Using mock mode")
         
-        print(f"📚 Loaded {len(self.theory_registry.theories)} categorical theories")
+        print(f"Loaded {len(self.theory_registry.theories)} categorical theories")
         print("=" * 60)
     
     def set_theory(self, theory_name: str):
@@ -165,7 +165,7 @@ class LeanVerificationServer:
             self.current_theory = self.theory_registry.theories[theory_name]
             print(f"📐 Theory set: {theory_name} ({self.current_theory.framework.value})")
         else:
-            print(f"❌ Theory '{theory_name}' not found")
+            print(f"Theory '{theory_name}' not found")
     
     def suggest_theories(self, objects: List[str], morphisms: List[str]) -> List[str]:
         """Suggest theories based on semantic similarity."""
@@ -179,7 +179,7 @@ class LeanVerificationServer:
         )
         
         similar = self.theory_registry.find_similar_theories(temp_sig, threshold=0.3)
-        print(f"🔍 Found {len(similar)} similar theories:")
+        print(f"Found {len(similar)} similar theories:")
         for name, score in similar:
             print(f"   - {name}: {score:.2%} match")
         return [name for name, _ in similar]
@@ -194,15 +194,15 @@ class LeanVerificationServer:
         
         for path in common_paths:
             if os.path.exists(path) and os.access(path, os.X_OK):
-                print(f"✅ Found Lean at: {path}")
+                print(f"Found Lean at: {path}")
                 return path
         
-        print("❌ Lean executable not found in common locations")
+        print("Lean executable not found in common locations")
         return "lean"
     
     def _quick_lean_test(self) -> bool:
         """Quick test without timeouts."""
-        print("🧪 Quick Lean test...")
+        print("Quick Lean test...")
         
         test_code = "theorem quick_test : True := by trivial"
         test_file = "/tmp/lean_quick_test.lean"
@@ -226,14 +226,14 @@ class LeanVerificationServer:
                 print("   ⚠ Lean test timed out")
             
             if process.returncode == 0:
-                print("   ✅ Lean test: SUCCESS")
+                print("  Lean test: SUCCESS")
                 return True
             else:
-                print(f"   ❌ Lean test failed")
+                print(f"  Lean test failed")
                 return False
                 
         except Exception as e:
-            print(f"   ❌ Lean test exception: {e}")
+            print(f"   Lean test exception: {e}")
             return False
         finally:
             try:
@@ -303,7 +303,7 @@ class LeanVerificationServer:
                 verified = process.returncode == 0
                 
                 if not verified and stderr:
-                    print(f"  ❌ Lean error: {stderr.split(chr(10))[0][:100]}")
+                    print(f"   Lean error: {stderr.split(chr(10))[0][:100]}")
                         
             except subprocess.TimeoutExpired:
                 process.kill()
@@ -314,7 +314,7 @@ class LeanVerificationServer:
             categorical_error = self._calculate_categorical_error(fluxes)
             
             if verified:
-                print(f"  ✅ LEAN THEOREM PROVEN!")
+                print(f"   LEAN THEOREM PROVEN!")
                 print(f"     Theory: {self.current_theory.framework.value}")
                 print(f"     Conservation error: {categorical_error:.2e}")
                 return True, categorical_error
@@ -386,7 +386,7 @@ theorem scale_positive : 0 < scale := by
     def export_theory_to_lean(self, theory_name: str, output_path: str):
         """Export a categorical theory as a Lean module."""
         if theory_name not in self.theory_registry.theories:
-            print(f"❌ Theory '{theory_name}' not found")
+            print(f" Theory '{theory_name}' not found")
             return
         
         theory = self.theory_registry.theories[theory_name]
@@ -414,7 +414,7 @@ end {theory_name.replace('_', '')}
         with open(output_path, 'w') as f:
             f.write(lean_code)
         
-        print(f"✅ Exported theory '{theory_name}' to {output_path}")
+        print(f" Exported theory '{theory_name}' to {output_path}")
 
 
 class LeanCodeGenerator:
