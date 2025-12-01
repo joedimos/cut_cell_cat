@@ -264,9 +264,9 @@ class VerifiedCategoricalSimulator(CategoricalSimulator):
             plt.close()
             print(f"  ✓ Categorical visualization saved to {output_path}")
         except ImportError:
-            print(f"  ⚠ Matplotlib not available, skipping visualization")
+            print(f" Matplotlib not available, skipping visualization")
         except Exception as e:
-            print(f"  ⚠ Visualization error: {e}")
+            print(f" Visualization error: {e}")
     
     def save_results(self, output_path: str = 'categorical_results.json'):
         """Save categorical simulation results."""
