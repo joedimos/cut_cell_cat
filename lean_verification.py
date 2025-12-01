@@ -223,7 +223,7 @@ class LeanVerificationServer:
             except subprocess.TimeoutExpired:
                 process.kill()
                 stdout, stderr = process.communicate()
-                print("   ⚠ Lean test timed out")
+                print("   Lean test timed out")
             
             if process.returncode == 0:
                 print("  Lean test: SUCCESS")
@@ -319,11 +319,11 @@ class LeanVerificationServer:
                 print(f"     Conservation error: {categorical_error:.2e}")
                 return True, categorical_error
             else:
-                print(f"  ⚠ Falling back to enhanced verification")
+                print(f"  Falling back to enhanced verification")
                 return self._verify_conservation_enhanced(fluxes)
                 
         except Exception as e:
-            print(f"  ⚠ Lean verification error: {e}")
+            print(f"  Lean verification error: {e}")
             return self._verify_conservation_enhanced(fluxes)
         finally:
             try:
@@ -451,7 +451,7 @@ class LeanCodeGenerator:
             if cfl > 0.5:
                 # Reduce time step to maintain stability
                 dt = 0.5 * dx * dx / diffusion
-                print(f"    ⚠ Adjusted dt to {dt:.3e} for stability (CFL: {cfl:.2f})")
+                print(f"    Adjusted dt to {dt:.3e} for stability (CFL: {cfl:.2f})")
             
             # Apply diffusion using central differences
             for i in range(1, n-1):
