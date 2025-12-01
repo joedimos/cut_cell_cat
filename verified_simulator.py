@@ -65,7 +65,7 @@ class VerifiedCategoricalSimulator(CategoricalSimulator):
         if not self.lean_server.mock_mode:
             print("✓ CATEGORICAL Lean integration initialized")
         else:
-            print("⚠ Using enhanced categorical verification (no Lean)")
+            print(" Using enhanced categorical verification (no Lean)")
     
     def run_verified(self, steps: int = 30):
         """Run simulation with categorical Lean verification."""
@@ -206,7 +206,7 @@ class VerifiedCategoricalSimulator(CategoricalSimulator):
         if not self.lean_server.mock_mode:
             print(f"\n✓ REAL categorical Lean theorem proving was used")
         else:
-            print(f"\n⚠ Enhanced categorical verification was used (no Lean)")
+            print(f"Enhanced categorical verification was used (no Lean)")
     
     def search_patterns(self, query: str) -> List[Dict[str, Any]]:
         """Semantic search over categorical patterns."""
