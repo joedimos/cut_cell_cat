@@ -40,7 +40,4 @@ This project bridges **numerical simulation** with **mathematically verified rea
 - State evolution plots  
 - Verified flux-composition displays  
 
----
-
-## 📁 Project Structure
 
