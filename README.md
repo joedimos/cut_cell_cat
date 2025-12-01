@@ -1,6 +1,6 @@
 # Verified Categorical Simulator
 
-A next-generation simulation framework combining **numerical computation**, **categorical mathematics**, and **Lean theorem proving** for *formally verified scientific simulations*.
+A next-generation simulation framework combining **numerical computation**, **category theorys**, and **Lean theorem proving**.
 
 ---
 
