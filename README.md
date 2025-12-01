@@ -20,22 +20,22 @@ This project bridges **numerical simulation** with **mathematically verified rea
 
 ##  Features
 
-### ✔ Real-Time Verification
+### Real-Time Verification
 - Lean theorem proving in every simulation step  
 - Categorical structure preservation  
 - Automatic error and theorem-proof tracking  
 
-### ✔ Verification Modes
+### Verification Modes
 - Conservation checking  
 - Error monitoring  
 - Semantic theory selection  
 
-### ✔ Monitoring & Analysis
+### Monitoring & Analysis
 - Full verification history  
 - Pattern detection (e.g., flux compositions)  
 - Integrated categorical knowledge graph  
 
-### ✔ Visualization
+### Visualization
 - Flux diagrams  
 - State evolution plots  
 - Verified flux-composition displays  
