@@ -4,7 +4,7 @@ A next-generation simulation framework combining **numerical computation**, **ca
 
 ---
 
-## 🚀 Overview
+##  Overview
 
 The `VerifiedCategoricalSimulator` integrates:
 
@@ -18,7 +18,7 @@ This project bridges **numerical simulation** with **mathematically verified rea
 
 ---
 
-## 📦 Features
+##  Features
 
 ### ✔ Real-Time Verification
 - Lean theorem proving in every simulation step  
