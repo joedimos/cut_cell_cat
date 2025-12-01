@@ -308,7 +308,7 @@ class LeanVerificationServer:
             except subprocess.TimeoutExpired:
                 process.kill()
                 stdout, stderr = process.communicate()
-                print("  ⚠ Lean verification timed out")
+                print("  Lean verification timed out")
                 verified = False
             
             categorical_error = self._calculate_categorical_error(fluxes)
