@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cut-cell-cat"
+version = "0.2.0"
+description = "Conservative cut-cell scalar diffusion with auditable numerical budgets"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24,<3"]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.7,<4"]
+
+[project.scripts]
+cut-cell-cat = "main:main"
+
+[tool.setuptools]
+packages = ["cutcell"]
+py-modules = ["main", "verified_simulator", "lean_verification", "knowledge_graph", "semantic_search"]

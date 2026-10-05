@@ -1,50 +1,32 @@
-import sys
-import os
+"""Command-line entry point; no import-time simulation side effects."""
+import argparse
+from verified_simulator import VerifiedCategoricalSimulator
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-try:
-    from verified_simulator import main_verified, VerifiedCategoricalSimulator
-    import numpy as np
-    
-    def test_installation():
-        """Test if all dependencies are available"""
-        print("Testing installation...")
+def main():
+    parser = argparse.ArgumentParser(description='Conservative 1-D cut-cell diffusion')
+    parser.add_argument('--cells', type=int, default=50)
+    parser.add_argument('--steps', type=int, default=30)
+    parser.add_argument('--dt', type=float, default=0.001, help='maximum requested timestep')
+    parser.add_argument('--diffusivity', type=float, default=0.1)
+    parser.add_argument('--method', choices=['euler', 'ssprk3'], default='ssprk3')
+    parser.add_argument('--lean', action='store_true', help='request concrete Lean budget certificates')
+    parser.add_argument('--output', default='categorical_results.json')
+    parser.add_argument('--plot', help='optional plot filename (requires matplotlib)')
+    args = parser.parse_args()
+    try:
+        sim = VerifiedCategoricalSimulator(args.cells, diffusivity=args.diffusivity,
+                  dt=args.dt, method=args.method, use_lean=args.lean)
+        sim.run_verified(args.steps)
+        sim.save_results(args.output)
+        if args.plot:
+            sim.visualize(args.plot)
+    except (ValueError, ArithmeticError, OSError) as error:
+        parser.exit(1, f'Error: {error}\n')
+    print(f'Steps={sim.model.iteration}; elapsed time={sim.model.time:.8g}; '
+          f'Lean certificates={sum(sim.verification_history["lean_theorems_proven"])}; '
+          f'results={args.output}')
 
-        
-        test_array = np.array([1, 2, 3])
-        print("✓ NumPy working")
-    
-        try:
-        
-            sim = VerifiedCategoricalSimulator(resolution=10)
-            print("✓ Verified simulator initialized")
-            return True
-        except Exception as e:
-            print(f"✗ Error initializing simulator: {e}")
-            return False
-    
-    def main():
-        print("Categorical Cut-Cell System - Installation Check")
-        print("=" * 50)
-        
-        if test_installation():
-            print("\n" + "=" * 50)
-            print("Starting main simulation...")
-            print("=" * 50)
-            main_verified()
-        else:
-            print("\nPlease check the installation instructions above.")
-            sys.exit(1)
-            
-except ImportError as e:
-    print(f"Import Error: {e}")
-    print("\nPlease make sure:")
-    print("1. All Python files are in the same directory")
-    print("2. Required packages are installed: numpy, matplotlib")
-    print("3. You're using Python 3.7+")
-    print("\nInstall with: pip install numpy matplotlib")
-    sys.exit(1)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
