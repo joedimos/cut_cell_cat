@@ -48,9 +48,12 @@ class CutCellGrid:
                    else vector(centers, n, "centers"))
         if np.any(centers <= faces[:-1]) or np.any(centers >= faces[1:]):
             raise ValueError("centers must lie strictly inside their underlying cells")
+        volumes = fractions * np.diff(faces)
+        if not np.all(np.isfinite(volumes)) or np.any(volumes[active] <= 0):
+            raise ValueError("active volumes must be positive and representable")
         for name, data in (("faces", faces), ("centers", centers),
                            ("volume_fractions", fractions), ("apertures", aperture),
-                           ("volumes", fractions * np.diff(faces))):
+                           ("volumes", volumes)):
             data.setflags(write=False)
             object.__setattr__(self, name, data)
 

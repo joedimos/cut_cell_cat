@@ -27,22 +27,32 @@ class DiffusionOperator:
         if np.any(self.diffusivity < 0):
             raise ValueError("diffusivity must be nonnegative")
         self.diffusivity.setflags(write=False)
-        self.left = left or BoundaryCondition()
-        self.right = right or BoundaryCondition()
+        self.left = BoundaryCondition() if left is None else left
+        self.right = BoundaryCondition() if right is None else right
+        if not isinstance(self.left, BoundaryCondition) or not isinstance(self.right, BoundaryCondition):
+            raise TypeError("left and right must be BoundaryCondition instances")
         distance = np.r_[grid.centers[0] - grid.faces[0], np.diff(grid.centers),
                          grid.faces[-1] - grid.centers[-1]]
-        self.conductance = grid.apertures * self.diffusivity / distance
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            self.conductance = grid.apertures * self.diffusivity / distance
+        if not np.all(np.isfinite(self.conductance)):
+            raise ValueError("face conductance is not representable; rescale geometry or diffusivity")
         self.conductance.setflags(write=False)
 
     def flux(self, state):
         """Return n+1 integrated face fluxes F = -aperture * kappa * grad(c)."""
         c = vector(state, self.grid.size, "state")
         flux = np.zeros(self.grid.size + 1)
-        flux[1:-1] = -self.conductance[1:-1] * np.diff(c)
+        # Never evaluate differences across closed faces: inactive placeholder
+        # values must not introduce 0 * inf or NaN into a disconnected component.
+        connected = self.conductance[1:-1] > 0
+        flux[1:-1][connected] = -self.conductance[1:-1][connected] * (c[1:][connected] - c[:-1][connected])
         flux[0] = (self.grid.apertures[0] * self.left.value if self.left.kind == "flux"
                    else self.conductance[0] * (self.left.value - c[0]))
         flux[-1] = (self.grid.apertures[-1] * self.right.value if self.right.kind == "flux"
                     else self.conductance[-1] * (c[-1] - self.right.value))
+        if not np.all(np.isfinite(flux)):
+            raise FloatingPointError("non-finite face flux")
         return flux
 
     def tendency(self, state, source=0.0):
