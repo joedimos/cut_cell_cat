@@ -1,9 +1,11 @@
+"""Numerical diagnostics and optional, explicitly scoped Lean evidence."""
+import math
+import shutil
 import subprocess
 import tempfile
-import os
-import json
+from fractions import Fraction
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
@@ -63,10 +65,10 @@ class TheoryRegistry:
                 ("divergence", "Flux", "Cell")
             ],
             composition_laws=[
-                "boundary ∘ flow = flux_composition",
-                "∑(flux_in) = ∑(flux_out)"  # Conservation
+                "V dc/dt = B F + V s",
+                "internal face columns of B sum to zero"
             ],
-            conservation_properties=["mass", "momentum", "energy"]
+            conservation_properties=["scalar_mass_balance"]
         ))
         
         # Structured cospan (stock-flow) theory
@@ -132,386 +134,145 @@ class TheoryRegistry:
 
 
 class LeanVerificationServer:
-    """Lean verification server with categorical theory support."""
-    
-    def __init__(self, lean_path: str = None, mock_mode: bool = False):
-        self.lean_path = self._find_lean_executable(lean_path)
-        self.mock_mode = mock_mode
+    """Optional Lean certificates of concrete mass budgets, not solver proofs.
+
+    Numeric success and a kernel-checked certificate are separate facts. A
+    missing or failing Lean process never counts as a theorem.
+    """
+
+    def __init__(self, lean_path=None, mock_mode=False, timeout=10.0):
+        self.lean_path = lean_path or shutil.which('lean')
+        self.mock_mode = bool(mock_mode or not self.lean_path)
+        if not np.isfinite(timeout) or timeout <= 0:
+            raise ValueError('timeout must be positive and finite')
+        self.timeout = timeout
         self.theory_registry = TheoryRegistry()
-        self.current_theory: Optional[CategoryTheorySignature] = None
-        
-        print("=" * 60)
-        print("CATEGORICAL VERIFICATION SERVER")
-        print("=" * 60)
-        
+        self.current_theory = self.theory_registry.theories['cut_cell_conservation']
+
+    def set_theory(self, theory_name):
+        if theory_name not in self.theory_registry.theories:
+            raise ValueError(f'unknown theory: {theory_name}')
+        self.current_theory = self.theory_registry.theories[theory_name]
+
+    def suggest_theories(self, objects, morphisms):
+        signature = CategoryTheorySignature(CategoryTheoryFramework.CUT_CELL,
+                     objects, [(m, '', '') for m in morphisms], [], [])
+        return [name for name, _ in self.theory_registry.find_similar_theories(signature, 0.3)]
+
+    @staticmethod
+    def _certificate(budget):
+        # Encode the supplied finite IEEE values exactly as rationals. No
+        # decimal truncation, relaxed threshold, sorry, axiom, or native_decide.
+        q = lambda x: Fraction.from_float(float(x))
+        residual = abs(q(budget.mass_after) - q(budget.mass_before)
+                       - q(budget.boundary_exchange) - q(budget.source_exchange))
+        tolerance = q(budget.tolerance)
+        lhs = residual.numerator * tolerance.denominator
+        rhs = tolerance.numerator * residual.denominator
+        return (f'-- Concrete snapshot only; not a proof of the numerical solver.\n'
+                f'theorem snapshot_budget : ({lhs} : Nat) ≤ {rhs} := by decide\n')
+
+    def verify_budget(self, budget):
+        values = [budget.mass_after, budget.mass_before, budget.boundary_exchange,
+                  budget.source_exchange, budget.tolerance]
+        if not all(np.isfinite(x) for x in values) or budget.tolerance < 0:
+            raise ValueError('budget values must be finite with nonnegative tolerance')
+        error = abs(math.fsum([budget.mass_after, -budget.mass_before,
+                              -budget.boundary_exchange, -budget.source_exchange]))
+        passed = error <= budget.tolerance
+        metadata = {'theory': 'cut_cell', 'conservation_properties': ['scalar_mass_balance'],
+                    'numeric_passed': passed, 'lean_proven': False,
+                    'proof_scope': 'concrete_snapshot_budget', 'backend': 'numerical',
+                    'lean_status': 'disabled_or_unavailable'}
         if not self.mock_mode:
-            lean_available = self._quick_lean_test()
-            if lean_available:
-                print("SUCCESS: REAL Lean Integration Activated!")
-                print("   Category theory verification enabled")
-                self.mock_mode = False
-            else:
-                print("Falling back to enhanced verification")
-                self.mock_mode = True
-        else:
-            print("Using mock mode")
-        
-        print(f"Loaded {len(self.theory_registry.theories)} categorical theories")
-        print("=" * 60)
-    
-    def set_theory(self, theory_name: str):
-        """Set the current categorical theory."""
-        if theory_name in self.theory_registry.theories:
-            self.current_theory = self.theory_registry.theories[theory_name]
-            print(f" Theory set: {theory_name} ({self.current_theory.framework.value})")
-        else:
-            print(f"Theory '{theory_name}' not found")
-    
-    def suggest_theories(self, objects: List[str], morphisms: List[str]) -> List[str]:
-        """Suggest theories based on semantic similarity."""
-        # Create a temporary signature
-        temp_sig = CategoryTheorySignature(
-            framework=CategoryTheoryFramework.CUT_CELL,  # Default
-            objects=objects,
-            morphisms=[(m, "", "") for m in morphisms],
-            composition_laws=[],
-            conservation_properties=[]
-        )
-        
-        similar = self.theory_registry.find_similar_theories(temp_sig, threshold=0.3)
-        print(f"Found {len(similar)} similar theories:")
-        for name, score in similar:
-            print(f"   - {name}: {score:.2%} match")
-        return [name for name, _ in similar]
-    
-    def _find_lean_executable(self, user_path: str = None) -> str:
-        """Find Lean executable quickly."""
-        common_paths = [
-            os.path.expanduser("~/.elan/bin/lean"),
-            "/usr/local/bin/lean",
-            "lean"
-        ]
-        
-        for path in common_paths:
-            if os.path.exists(path) and os.access(path, os.X_OK):
-                print(f"Found Lean at: {path}")
-                return path
-        
-        print("Lean executable not found in common locations")
-        return "lean"
-    
-    def _quick_lean_test(self) -> bool:
-        """Quick test without timeouts."""
-        print("Quick Lean test...")
-        
-        test_code = "theorem quick_test : True := by trivial"
-        test_file = "/tmp/lean_quick_test.lean"
-        
-        try:
-            with open(test_file, 'w') as f:
-                f.write(test_code)
-            
-            process = subprocess.Popen(
-                [self.lean_path, test_file],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            try:
-                stdout, stderr = process.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                stdout, stderr = process.communicate()
-                print("   Lean test timed out")
-            
-            if process.returncode == 0:
-                print("  Lean test: SUCCESS")
-                return True
-            else:
-                print(f"  Lean test failed")
-                return False
-                
-        except Exception as e:
-            print(f"   Lean test exception: {e}")
-            return False
-        finally:
-            try:
-                os.unlink(test_file)
-            except:
-                pass
-    
-    def verify_conservation(self, cell_states: List[float], fluxes: List[float], 
-                          theory_name: str = None) -> Tuple[bool, float, Dict[str, Any]]:
-        """Verify conservation laws within a categorical framework."""
-        
-        # Auto-detect or use specified theory
+            metadata['lean_status'] = 'not_run_numeric_failure'
+            if passed:
+                try:
+                    with tempfile.TemporaryDirectory(prefix='cutcell-lean-') as directory:
+                        path = Path(directory) / 'Budget.lean'
+                        path.write_text(self._certificate(budget), encoding='utf-8')
+                        result = subprocess.run([self.lean_path, str(path)], capture_output=True,
+                                                text=True, timeout=self.timeout, check=False)
+                    # Generated code has no holes; warnings still fail closed.
+                    proved = result.returncode == 0 and not (result.stdout.strip() or result.stderr.strip())
+                    metadata.update(lean_proven=proved, backend='lean' if proved else 'numerical',
+                                    lean_status='proved' if proved else 'failed')
+                except subprocess.TimeoutExpired:
+                    metadata['lean_status'] = 'timeout'
+                except OSError:
+                    metadata['lean_status'] = 'unavailable'
+        return passed, error, metadata
+
+    def verify_conservation(self, cell_states, fluxes, theory_name=None):
+        """Deprecated snapshot API cannot establish an evolution mass budget."""
         if theory_name:
             self.set_theory(theory_name)
-        elif self.current_theory is None:
-            self.set_theory("cut_cell_conservation")
-        
-        # Get theory-specific metadata
-        metadata = {
-            "theory": self.current_theory.framework.value if self.current_theory else "unknown",
-            "conservation_properties": self.current_theory.conservation_properties if self.current_theory else []
-        }
-        
-        if self.mock_mode:
-            verified, error = self._verify_conservation_enhanced(fluxes)
-        else:
-            verified, error = self._verify_conservation_lean(cell_states, fluxes)
-        
-        return verified, error, metadata
-    
-    def _verify_conservation_enhanced(self, fluxes: List[float]) -> Tuple[bool, float]:
-        """Enhanced mock verification with categorical semantics."""
-        errors = []
-        
-        # Composition law verification
-        for i in range(2, len(fluxes)):
-            composition = fluxes[i] * fluxes[i-1]
-            errors.append(abs(composition))
-        
-        # Conservation law verification
-        total_flux = sum(fluxes)
-        errors.append(abs(total_flux))
-        
-        max_error = max(errors) if errors else 0.0
-        verified = max_error < 1e-8
-        
-        return verified, max_error
-    
-    def _verify_conservation_lean(self, cell_states: List[float], fluxes: List[float]) -> Tuple[bool, float]:
-        """Real Lean verification with categorical theory."""
-        try:
-            lean_code = self._generate_categorical_proof(fluxes)
-            
-            temp_file = "/tmp/categorical_verify.lean"
-            with open(temp_file, 'w') as f:
-                f.write(lean_code)
-            
-            process = subprocess.Popen(
-                [self.lean_path, temp_file],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            try:
-                stdout, stderr = process.communicate(timeout=30)
-                verified = process.returncode == 0
-                
-                if not verified and stderr:
-                    print(f"   Lean error: {stderr.split(chr(10))[0][:100]}")
-                        
-            except subprocess.TimeoutExpired:
-                process.kill()
-                stdout, stderr = process.communicate()
-                print("  Lean verification timed out")
-                verified = False
-            
-            categorical_error = self._calculate_categorical_error(fluxes)
-            
-            if verified:
-                print(f"   LEAN THEOREM PROVEN!")
-                print(f"     Theory: {self.current_theory.framework.value}")
-                print(f"     Conservation error: {categorical_error:.2e}")
-                return True, categorical_error
-            else:
-                print(f"  Falling back to enhanced verification")
-                return self._verify_conservation_enhanced(fluxes)
-                
-        except Exception as e:
-            print(f"  Lean verification error: {e}")
-            return self._verify_conservation_enhanced(fluxes)
-        finally:
-            try:
-                os.unlink(temp_file)
-            except:
-                pass
-    
-    def _generate_categorical_proof(self, fluxes: List[float]) -> str:
-        """Generate Lean proof based on categorical theory."""
-        total_flux = sum(fluxes)
-        abs_total_flux = abs(total_flux)
-        
-        # Scale to natural numbers
-        scale = 1000000
-        scaled_flux = int(abs_total_flux * scale)
-        threshold_scaled = int(0.01 * scale)
-        
-        # Generate theory-specific header
-        theory_comment = f"-- Categorical Theory: {self.current_theory.framework.value}" if self.current_theory else ""
-        conservation_props = ", ".join(self.current_theory.conservation_properties) if self.current_theory else "mass"
-        
-        return f"""-- Categorical Conservation Verification
-{theory_comment}
--- Conservation properties: {conservation_props}
--- Verifying flux conservation using scaled natural numbers
+        return False, float('inf'), {
+            'theory': self.current_theory.framework.value, 'lean_proven': False,
+            'conservation_properties': [], 'backend': 'unverified',
+            'reason': 'Use verify_budget with before/after mass and integrated exchanges.'}
 
-def scaled_flux : Nat := {scaled_flux}
-def scale : Nat := {scale}
-def threshold : Nat := {threshold_scaled}
-
--- Main conservation theorem
-theorem conservation_verified : scaled_flux < threshold := by
-  decide
-
--- Auxiliary properties
-theorem flux_nonneg : 0 ≤ scaled_flux := by
-  decide
-
-theorem scale_positive : 0 < scale := by
-  decide
-
-#check conservation_verified
-"""
-    
-    def _calculate_categorical_error(self, fluxes: List[float]) -> float:
-        """Calculate error based on categorical framework."""
-        errors = []
-        
-        # Composition errors (morphism composition)
-        for i in range(2, len(fluxes)):
-            composition = fluxes[i] * fluxes[i-1]
-            errors.append(abs(composition))
-        
-        # Conservation errors
-        total_flux = sum(fluxes)
-        errors.append(abs(total_flux))
-        
-        return max(errors) if errors else 1e-16
-    
-    def export_theory_to_lean(self, theory_name: str, output_path: str):
-        """Export a categorical theory as a Lean module."""
-        if theory_name not in self.theory_registry.theories:
-            print(f" Theory '{theory_name}' not found")
-            return
-        
+    def export_theory_to_lean(self, theory_name, output_path):
+        """Export descriptive comments only; registry entries are not theorems."""
         theory = self.theory_registry.theories[theory_name]
-        
-        lean_code = f"""-- Categorical Theory: {theory_name}
--- Framework: {theory.framework.value}
-
-namespace {theory_name.replace('_', '')}
-
--- Objects in the category
-{chr(10).join(f'axiom {obj} : Type' for obj in theory.objects)}
-
--- Morphisms
-{chr(10).join(f'axiom {m[0]} : {m[1]} → {m[2]}' for m in theory.morphisms if m[1] and m[2])}
-
--- Composition laws
-{chr(10).join(f'-- {law}' for law in theory.composition_laws)}
-
--- Conservation properties
-{chr(10).join(f'-- Conserves: {prop}' for prop in theory.conservation_properties)}
-
-end {theory_name.replace('_', '')}
-"""
-        
-        with open(output_path, 'w') as f:
-            f.write(lean_code)
-        
-        print(f" Exported theory '{theory_name}' to {output_path}")
+        lines = [f'-- Descriptive schema: {theory_name}; NOT a verified theory.']
+        lines += [f'-- {law}' for law in theory.composition_laws]
+        Path(output_path).write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 class LeanCodeGenerator:
-    """Generate verified categorical algorithms."""
-    
-    def __init__(self, verification_server: LeanVerificationServer):
+    """Legacy numerical factories; generated Python has no formal certificate."""
+
+    def __init__(self, verification_server):
         self.server = verification_server
-    
-    def generate_verified_flux_computation(self, tolerance: float = 1e-10):
-        """Generate flux computation with categorical verification."""
-        def compute_flux(states: List[float], n: int) -> float:
-            if 1 <= n < len(states):
-                return states[n] - states[n-1]
-            return 0.0
+
+    def generate_verified_flux_computation(self, tolerance=1e-10):
+        from cutcell import CutCellGrid, DiffusionOperator
+        def compute_flux(states, n):
+            if not 0 <= n <= len(states):
+                raise IndexError('face index out of range')
+            return float(DiffusionOperator(CutCellGrid.uniform(len(states))).flux(states)[n])
         return compute_flux
-    
-    def generate_verified_evolution_step(self, diffusion: float, dt: float):
-        """Generate evolution step for cut-cell simulation."""
-        def evolve_step(states: List[float], diffusion: float, dt: float) -> List[float]:
-            """
-            Evolve states using diffusion equation.
-            Uses finite difference method with stability checking.
-            """
-            new_states = states.copy()
-            n = len(states)
-            
-            if n <= 2:
-                return new_states  # Not enough cells for evolution
-            
-            dx = 1.0 / (n - 1)  # Spatial step
-            
-            # Check CFL condition for stability
-            cfl = dt * diffusion / (dx * dx)
-            if cfl > 0.5:
-                # Reduce time step to maintain stability
-                dt = 0.5 * dx * dx / diffusion
-                print(f"    Adjusted dt to {dt:.3e} for stability (CFL: {cfl:.2f})")
-            
-            # Apply diffusion using central differences
-            for i in range(1, n-1):
-                laplacian = states[i+1] - 2*states[i] + states[i-1]
-                new_states[i] = states[i] + dt * diffusion * laplacian / (dx * dx)
-                
-                # Ensure physical bounds
-                new_states[i] = max(0.0, min(1.0, new_states[i]))
-            
-            # Boundary conditions (Neumann: zero flux)
-            new_states[0] = states[0]
-            new_states[-1] = states[-1]
-            
-            return new_states
+
+    def generate_verified_evolution_step(self, diffusion, dt):
+        from cutcell import CutCellGrid, DiffusionModel
+        def evolve_step(states, diffusion=diffusion, dt=dt):
+            model = DiffusionModel(CutCellGrid.uniform(len(states)), states, diffusion)
+            # Subcycle to the requested elapsed time instead of silently reducing it.
+            model.run_until(dt, max_dt=dt)
+            return model.state.tolist()
         return evolve_step
-    
-    def generate_stock_flow_dynamics(self, dt: float = 0.01):
-        """Generate stock-flow dynamics (structured cospan)."""
-        def stock_flow_step(stocks: List[float], flows: List[Tuple[int, int, float]]) -> List[float]:
-            """
-            Evolve stocks according to flows.
-            flows: List of (source_idx, target_idx, rate)
-            """
-            new_stocks = stocks.copy()
-            
+
+    def generate_stock_flow_dynamics(self, dt=0.01):
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError('dt must be positive and finite')
+        def stock_flow_step(stocks, flows):
+            new = np.asarray(stocks, dtype=float).copy()
+            if not np.all(np.isfinite(new)) or np.any(new < 0):
+                raise ValueError('stocks must be finite and nonnegative')
             for source, target, rate in flows:
-                if 0 <= source < len(stocks) and 0 <= target < len(stocks):
-                    flow_amount = rate * dt
-                    # Ensure we don't take more than available
-                    available = new_stocks[source]
-                    actual_flow = min(flow_amount, available)
-                    
-                    new_stocks[source] -= actual_flow
-                    new_stocks[target] += actual_flow
-            
-            return new_stocks
-        
+                if not (0 <= source < len(new) and 0 <= target < len(new)) or not np.isfinite(rate) or rate < 0:
+                    raise ValueError('invalid flow')
+                amount = min(rate * dt, new[source])
+                new[source] -= amount
+                new[target] += amount
+            return new.tolist()
         return stock_flow_step
-    
+
     def generate_petri_net_step(self):
-        """Generate Petri net firing dynamics."""
-        def petri_step(tokens: List[int], transitions: List[Tuple[List[int], List[int]]]) -> List[int]:
-            """
-            Fire enabled transitions.
-            transitions: List of (input_places, output_places)
-            """
-            new_tokens = tokens.copy()
-            
+        from collections import Counter
+        def petri_step(tokens, transitions):
+            new = list(tokens)
+            if any(isinstance(t, bool) or not isinstance(t, int) or t < 0 for t in new):
+                raise ValueError('tokens must be nonnegative integers')
             for inputs, outputs in transitions:
-                # Check if transition is enabled (all input places have at least 1 token)
-                enabled = all(new_tokens[i] >= 1 for i in inputs)
-                
-                if enabled:
-                    # Consume tokens from inputs
+                if any(not isinstance(i, int) or not 0 <= i < len(new) for i in inputs + outputs):
+                    raise ValueError('invalid place')
+                required = Counter(inputs)
+                if all(new[i] >= count for i, count in required.items()):
                     for i in inputs:
-                        new_tokens[i] -= 1
-                    # Produce tokens to outputs
+                        new[i] -= 1
                     for i in outputs:
-                        new_tokens[i] += 1
-            
-            return new_tokens
-        
+                        new[i] += 1
+            return new
         return petri_step
