@@ -29,6 +29,8 @@ manual merges should be blocked automatically.
 Each step checks finite state and budget values, every individual cell's integrated
 mass balance, global mass balance, and cumulative mass balance since the first step.
 A failed numerical check leaves state, clock, iteration, and ledger unchanged.
+Relative tolerances use volume-weighted absolute scalar mass, so large signed
+fields with near-zero net mass are not spuriously rejected.
 External mass-changing state edits after evolution begins are detected by the ledger;
 construct a new model to intentionally restart with a different state.
 

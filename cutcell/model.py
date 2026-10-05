@@ -53,6 +53,7 @@ class DiffusionModel:
         self.require_nonnegative = require_nonnegative
         self.history = []
         self.initial_mass = None
+        self.initial_mass_scale = None
         self.total_exchange = 0.0
         self._exchange_correction = 0.0
 
@@ -90,7 +91,10 @@ class DiffusionModel:
         source = dt * self.mass(self.source)
         after = self.mass(new)
         residual = math.fsum([after, -before, -boundary, -source])
-        tolerance = self.atol + self.rtol * max(abs(before), abs(after), abs(boundary), abs(source))
+        # Signed tracers may have near-zero net mass but large absolute mass.
+        # Scale roundoff tolerances with the L1 mass, not a cancelling sum.
+        mass_scale = max(self.mass(np.abs(c)), self.mass(np.abs(new)))
+        tolerance = self.atol + self.rtol * max(mass_scale, abs(boundary), abs(source))
         volumes = self.grid.volumes
         local_change = volumes * (new - c)
         local_exchange = -dt * np.diff(weighted_flux) + dt * volumes * self.source
@@ -105,7 +109,8 @@ class DiffusionModel:
         correction = (total - self.total_exchange) - exchange
         initial = before if self.initial_mass is None else self.initial_mass
         cumulative = math.fsum([after, -initial, -total])
-        cumulative_tolerance = self.atol + self.rtol * max(abs(initial), abs(after), abs(total))
+        initial_scale = mass_scale if self.initial_mass_scale is None else self.initial_mass_scale
+        cumulative_tolerance = self.atol + self.rtol * max(initial_scale, mass_scale, abs(total))
         if not np.isfinite(cumulative) or abs(cumulative) > cumulative_tolerance:
             raise ArithmeticError("cumulative mass balance failed; step was not committed")
         wet = new[self.grid.active]
@@ -122,6 +127,7 @@ class DiffusionModel:
             raise ArithmeticError(f"mass budget failed: {residual}; step was not committed")
         self.state, self.time = new, budget.time
         self.initial_mass = initial
+        self.initial_mass_scale = initial_scale
         self.total_exchange, self._exchange_correction = total, correction
         self.iteration += 1
         self.history.append(budget)

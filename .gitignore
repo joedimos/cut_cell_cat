@@ -9,4 +9,3 @@ categorical_results.json
 categorical_*.png
 validation/results/
 .lake/
-lake-manifest.json

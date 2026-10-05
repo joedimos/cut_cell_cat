@@ -72,7 +72,7 @@ It is a deliberate difference from Oceananigans' low-storage Wray RK3.
 Each accepted step records
 
     residual = M_after - M_before - boundary_exchange - source_exchange
-    tolerance = atol + rtol * max(|M_before|, |M_after|, |boundary|, |source|).
+    tolerance = atol + rtol * max(sum(V |c_before|), sum(V |c_after|), |boundary|, |source|).
 
 Mass sums use compensated summation. A non-finite state or failed budget raises
 before committing state, clock, or history. No clipping disguises mass loss.

@@ -93,6 +93,13 @@ class ProductionTests(unittest.TestCase):
         with np.errstate(all='raise'):
             np.testing.assert_array_equal(op.flux([1e308, -1e308, 1e308]), np.zeros(4))
 
+    def test_large_signed_field_does_not_fail_on_mass_cancellation(self):
+        grid = CutCellGrid.uniform(8)
+        model = DiffusionModel(grid, 1e8*np.cos(np.pi*grid.centers))
+        model.run_until(.03)
+        self.assertLess(abs(model.history[-1].cumulative_residual), 1e-6)
+        self.assertTrue(all(b.passed for b in model.history))
+
     def test_randomized_evolution_invariants(self):
         rng = np.random.default_rng(491)
         for case in range(40):
