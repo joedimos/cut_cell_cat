@@ -1,7 +1,12 @@
 name: numerical-validation
 on:
   push:
+    branches: [main]
+  workflow_dispatch:
   pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -63,4 +68,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: oceananigans-reference
-          path: oceananigans.csv
+          path: oceananigans.csv*

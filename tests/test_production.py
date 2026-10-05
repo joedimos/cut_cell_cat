@@ -119,3 +119,32 @@ class ProductionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class IndependentReferenceTests(unittest.TestCase):
+    def test_cut_cell_evolution_against_independent_matrix_exponential(self):
+        # Assemble a mass-symmetric graph generator without calling the solver's
+        # flux or tendency routines, then exponentiate its eigenvalues exactly.
+        grid = CutCellGrid([0, .15, .4, .7, 1], [.3, .8, 1, .6], [.0, .4, .8, .6, 0.])
+        diffusivity = np.array([.1, .2, .15, .3, .1])
+        n = grid.size
+        stiffness = np.zeros((n, n))
+        for face in range(1, n):
+            g = grid.apertures[face]*diffusivity[face]/(grid.centers[face]-grid.centers[face-1])
+            i, j = face-1, face
+            stiffness[i, i] -= g
+            stiffness[j, j] -= g
+            stiffness[i, j] += g
+            stiffness[j, i] += g
+        root_volume = np.sqrt(grid.volumes)
+        symmetric = stiffness/root_volume[:, None]/root_volume[None, :]
+        eigenvalues, basis = np.linalg.eigh(symmetric)
+        initial = np.array([.2, 1.3, .7, .1])
+        time = .04
+        exact = (basis @ (np.exp(time*eigenvalues) * (basis.T @ (root_volume*initial))))/root_volume
+        errors = []
+        for dt in (.001, .0005, .00025):
+            model = DiffusionModel(grid, initial, diffusivity)
+            model.run_until(time, max_dt=dt)
+            errors.append(np.linalg.norm(model.state-exact))
+        self.assertLess(errors[-1], 1e-8)
+        self.assertTrue(all(a/b > 7 for a,b in zip(errors, errors[1:])), errors)
