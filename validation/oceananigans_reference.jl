@@ -13,7 +13,7 @@ grid = RectilinearGrid(size=N, z=(0, 1), topology=(Flat, Flat, Bounded))
 model = NonhydrostaticModel(grid; closure=ScalarDiffusivity(κ=κ), tracers=:c,
                            timestepper=:RungeKutta3)
 # The function supplies cell-average values for this uniform cosine profile.
-set!(model, c=(x, y, z) -> 0.5 + 0.2 * cos(π*z) * sinc(1/(2N)))
+set!(model, c=z -> 0.5 + 0.2 * cos(π*z) * sinc(1/(2N)))
 simulation = Simulation(model; Δt, stop_iteration=steps)
 run!(simulation)
 z = collect(znodes(model.tracers.c))
@@ -23,4 +23,5 @@ open(output, "w") do io
     println(io, "z,c,time")
     writedlm(io, hcat(z, c, fill(model.clock.time, N)), ',')
 end
+cp(joinpath(dirname(Base.active_project()), "Manifest.toml"), output * ".Manifest.toml"; force=true)
 println("Wrote ", output)

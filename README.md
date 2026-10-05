@@ -7,7 +7,7 @@ and optional Lean certificates for **concrete budget snapshots**.
 The numerical architecture is referenced to **CliMA/Oceananigans.jl at
 `819a245b837041d01fcf273d74a8b45db81ea14a`**. Read the
 [source-by-source comparison](docs/OCEANANIGANS_REFERENCE.md),
-[mathematical contract](docs/NUMERICS.md), and [migration notes](docs/MIGRATION.md).
+[mathematical contract](docs/NUMERICS.md), and [migration notes](docs/MIGRATION.md), and [production validation contract](docs/PRODUCTION_READINESS.md).
 This is an independent Python implementation of a limited scalar-diffusion scope.
 It is not an Oceananigans port, a 3-D ocean model, or a formally verified solver.
 
@@ -87,8 +87,8 @@ neighboring fluxes are not morphism composition or a conservation law.
   enough mass to make concentrations negative; there is no artificial clipping.
 - No advection, pressure projection, velocity dynamics, GPU execution, moving
   boundaries, periodic topology, or adaptive multiscale coupling yet.
-- Python tests and analytic convergence run in CI. Julia/Oceananigans and real Lean
-  need their own installed runtimes; see the validation instructions below.
+- Python tests and analytic convergence run on Linux, Windows, and macOS in CI.
+  Separate release jobs install and run real Julia/Oceananigans and Lean.
 
 ## Optional direct Oceananigans comparison
 
@@ -100,5 +100,17 @@ python validation/compare_oceananigans.py /tmp/oceananigans.csv
 The Julia script installs the exact referenced commit into a temporary Julia
 project and writes a bounded 1-D cosine-diffusion reference. This needs network
 access and may take several minutes. The Python comparison requires the pinned
-commit in the CSV header and tests the full profile and elapsed time. It has not
-been executed in the development environment, which has no Julia installation.
+commit in the CSV header and tests the full profile and elapsed time. It runs in the dedicated CI job; the local development environment has no Julia
+installation. Consult the exact commit's CI results for pass/fail evidence.
+
+## Runtime policies
+
+- Every step enforces local, global, and cumulative mass budgets.
+- `--nonnegative` rejects negative concentrations, including forcing-induced negatives.
+- `--require-lean` requires real certificates and exits nonzero on failure.
+- `--history-limit 10000` bounds retained diagnostics; total step/certificate counts
+  and the cumulative ledger are independent of retention.
+- JSON results include full numerical configuration and are replaced atomically.
+
+Version 0.3.0 adds these controls. Successful CI validates the documented 1-D
+scope and reference cases; it is not certification for unimplemented physics.

@@ -62,8 +62,10 @@ L2 errors approximately 1.3023e-5, 3.2628e-6, 8.1613e-7, 2.0406e-7, with success
 orders 1.9969, 1.9992, 1.9998. Maximum mass drift was approximately 1.8e-15.
 The reproducible command is `python validation/convergence.py`.
 
-The direct Julia/Oceananigans comparison is supplied but was **not executed** in
-this environment (Julia is unavailable). The real Lean test likewise needs Lean.
+The direct Julia/Oceananigans comparison and real Lean check now run as dedicated
+CI gates. They remain unavailable in the local Python-only environment. The
+initial local results above are historical; inspect the current commit workflow
+for release evidence.
 Mocked subprocess tests validate status handling only and are not Lean evidence.
 Python CI runs multiple Python versions; its remote results must be inspected
 separately from the local validation above.

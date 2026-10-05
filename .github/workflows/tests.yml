@@ -1,15 +1,27 @@
 name: numerical-validation
 on:
   push:
+    branches: [main]
+  workflow_dispatch:
   pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   numerics:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       matrix:
         python: ['3.10', '3.12', '3.13']
+        os: [ubuntu-latest]
+        include:
+          - python: '3.12'
+            os: windows-latest
+          - python: '3.12'
+            os: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,4 +30,42 @@ jobs:
       - run: python -m pip install .
       - run: python -m unittest discover -s tests -v
       - run: python validation/convergence.py
-      - run: cut-cell-cat --cells 32 --steps 20 --output /tmp/cutcell-results.json
+      - run: python validation/geometry_convergence.py
+      - run: cut-cell-cat --cells 32 --steps 20 --output cutcell-results.json
+  lean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install .
+      - uses: leanprover/lean-action@v1
+        with:
+          auto-config: false
+          use-github-cache: false
+      - run: lean --version
+      - run: python -m unittest discover -s tests -p test_verification.py -v
+      - run: cut-cell-cat --cells 16 --steps 10 --require-lean --output lean-results.json
+  oceananigans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JULIA_NUM_THREADS: '2'
+      JULIA_NUM_PRECOMPILE_TASKS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install .
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.11'
+      - run: julia --startup-file=no validation/oceananigans_reference.jl oceananigans.csv
+      - run: python validation/compare_oceananigans.py oceananigans.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oceananigans-reference
+          path: oceananigans.csv*

@@ -1,6 +1,6 @@
 """Compatibility facade for the geometry-aware finite-volume implementation."""
-from dataclasses import dataclass
-import json
+from dataclasses import asdict, dataclass
+from cutcell.io import atomic_json
 import time
 import numpy as np
 from cutcell import CutCellGrid, DiffusionModel
@@ -43,15 +43,21 @@ class CategoricalSimulator:
 class VerifiedCategoricalSimulator(CategoricalSimulator):
     """Numerically budget-checked simulation, with optional Lean snapshot checks."""
     def __init__(self, resolution=50, use_multiscale=False, *, grid=None, diffusivity=0.1,
-                 dt=0.001, method='ssprk3', use_lean=False, lean_path=None):
+                 dt=0.001, method='ssprk3', use_lean=False, lean_path=None,
+                 require_lean=False, history_limit=10000, require_nonnegative=False):
         super().__init__(resolution, use_multiscale, grid=grid, diffusivity=diffusivity)
         if not np.isfinite(dt) or dt <= 0:
             raise ValueError('dt must be positive and finite')
         self.dt = dt
         self.model = DiffusionModel(self.complex.grid, [c.value for c in self.complex.cell_states],
-                                    diffusivity, method=method)
+                                    diffusivity, method=method, history_limit=history_limit,
+                                    require_nonnegative=require_nonnegative)
         self.complex.operator = self.model.operator
-        self.lean_server = LeanVerificationServer(lean_path, mock_mode=not use_lean)
+        self.lean_server = LeanVerificationServer(lean_path, mock_mode=not (use_lean or require_lean))
+        self.require_lean = require_lean
+        self.lean_certificate_count = 0
+        if require_lean and self.lean_server.mock_mode:
+            raise RuntimeError("Lean is required but unavailable")
         self.code_generator = LeanCodeGenerator(self.lean_server)
         self.verified_flux_compute = self.code_generator.generate_verified_flux_computation()
         self.verified_evolve_step = self.code_generator.generate_verified_evolution_step(diffusivity, dt)
@@ -68,6 +74,8 @@ class VerifiedCategoricalSimulator(CategoricalSimulator):
             result = self._verify_current_state()
             result['verification_time'] = time.perf_counter() - start
             self._record_verification(result)
+            if self.require_lean and not result['theorems_proven']:
+                raise RuntimeError('required Lean certificate failed after numerical step; no successful run output')
             self.kg.update(self.complex)
         return self.model.history
 
@@ -94,8 +102,11 @@ class VerifiedCategoricalSimulator(CategoricalSimulator):
                 'lean_theorems_proven': 'theorems_proven', 'verification_times': 'verification_time',
                 'categorical_errors': 'categorical_error', 'theories_used': 'theory_used',
                 'lean_status': 'lean_status'}
+        self.lean_certificate_count += result['theorems_proven']
         for target, source in keys.items():
             self.verification_history[target].append(result[source])
+            if len(self.verification_history[target]) > self.model.history_limit:
+                del self.verification_history[target][0]
 
     def search_patterns(self, query):
         return self.kg.search_patterns(query)
@@ -118,17 +129,28 @@ class VerifiedCategoricalSimulator(CategoricalSimulator):
         grid = self.complex.grid
         result = {'schema_version': 2, 'reference_commit': OCEANANIGANS_COMMIT,
                   'method': self.model.method, 'requested_dt': self.dt, 'time': self.model.time,
+                  'configuration': {'diffusivity': self.model.operator.diffusivity.tolist(),
+                                    'source': self.model.source.tolist(),
+                                    'left': asdict(self.model.operator.left),
+                                    'right': asdict(self.model.operator.right),
+                                    'safety': self.model.safety, 'atol': self.model.atol,
+                                    'rtol': self.model.rtol,
+                                    'require_nonnegative': self.model.require_nonnegative},
                   'grid': {k: getattr(grid, k).tolist() for k in
                            ('faces', 'centers', 'volumes', 'volume_fractions', 'apertures')},
                   'final_state': self.model.state.tolist(),
                   'final_fluxes': self.model.operator.flux(self.model.state).tolist(),
                   'budgets': [b.to_dict() for b in self.model.history],
                   'verification_history': self.verification_history,
-                  'lean_used': any(self.verification_history['lean_theorems_proven']),
+                  'lean_used': self.lean_certificate_count > 0,
+                  'lean_certificate_count': self.lean_certificate_count,
+                  'history_limit': self.model.history_limit,
+                  'retained_steps': len(self.model.history),
+                  'initial_mass': self.model.initial_mass,
+                  'total_exchange': self.model.total_exchange,
                   'proof_scope': 'concrete_snapshot_budget_only',
                   'total_steps': self.model.iteration, 'patterns_detected': len(self.kg.patterns)}
-        with open(output_path, 'w', encoding='utf-8') as stream:
-            json.dump(result, stream, indent=2, allow_nan=False)
+        atomic_json(output_path, result)
 
 
 def main_verified():

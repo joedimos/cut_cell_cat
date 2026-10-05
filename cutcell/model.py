@@ -21,6 +21,8 @@ class StepBudget:
     minimum: float
     maximum: float
     energy: float
+    max_local_residual: float
+    cumulative_residual: float
 
     def to_dict(self):
         return asdict(self)
@@ -28,7 +30,8 @@ class StepBudget:
 
 class DiffusionModel:
     def __init__(self, grid, state, diffusivity=0.1, *, left=None, right=None,
-                 source=0.0, method="ssprk3", safety=0.9, atol=1e-12, rtol=1e-10):
+                 source=0.0, method="ssprk3", safety=0.9, atol=1e-12, rtol=1e-10,
+                 history_limit=10000, require_nonnegative=False):
         self.grid = grid
         self.operator = DiffusionOperator(grid, diffusivity, left, right)
         self.state = vector(state, grid.size, "state")
@@ -42,7 +45,17 @@ class DiffusionModel:
         self.method, self.safety, self.atol, self.rtol = method, safety, atol, rtol
         self.operator.stable_dt(safety)
         self.time, self.iteration = 0.0, 0
+        if isinstance(history_limit, bool) or not isinstance(history_limit, int) or history_limit < 1:
+            raise ValueError("history_limit must be a positive integer")
+        if not isinstance(require_nonnegative, bool):
+            raise ValueError("require_nonnegative must be a boolean")
+        self.history_limit = history_limit
+        self.require_nonnegative = require_nonnegative
         self.history = []
+        self.initial_mass = None
+        self.initial_mass_scale = None
+        self.total_exchange = 0.0
+        self._exchange_correction = 0.0
 
     def mass(self, state=None):
         c = self.state if state is None else vector(state, self.grid.size, "state")
@@ -56,6 +69,8 @@ class DiffusionModel:
         if self.time + dt == self.time or not np.isfinite(self.time + dt):
             raise FloatingPointError("time step cannot advance the floating-point clock")
         c = vector(self.state, self.grid.size, "state")
+        if self.require_nonnegative and np.any(c[self.grid.active] < 0):
+            raise ValueError("negative initial concentration")
         before = self.mass(c)
         operator = self.operator
         f0 = operator.flux(c)
@@ -76,19 +91,48 @@ class DiffusionModel:
         source = dt * self.mass(self.source)
         after = self.mass(new)
         residual = math.fsum([after, -before, -boundary, -source])
-        tolerance = self.atol + self.rtol * max(abs(before), abs(after), abs(boundary), abs(source))
+        # Signed tracers may have near-zero net mass but large absolute mass.
+        # Scale roundoff tolerances with the L1 mass, not a cancelling sum.
+        mass_scale = max(self.mass(np.abs(c)), self.mass(np.abs(new)))
+        tolerance = self.atol + self.rtol * max(mass_scale, abs(boundary), abs(source))
+        volumes = self.grid.volumes
+        local_change = volumes * (new - c)
+        local_exchange = -dt * np.diff(weighted_flux) + dt * volumes * self.source
+        local_residual = local_change - local_exchange
+        local_scale = np.maximum.reduce([np.abs(volumes*c), np.abs(volumes*new), np.abs(local_exchange)])
+        local_tolerance = self.atol * volumes / math.fsum(volumes) + self.rtol * local_scale
+        if not np.all(np.isfinite(local_residual)) or np.any(np.abs(local_residual) > local_tolerance):
+            raise ArithmeticError("local cell balance failed; step was not committed")
+        # Compensated cumulative exchange, independent of retained history.
+        exchange = math.fsum([boundary, source]) - self._exchange_correction
+        total = self.total_exchange + exchange
+        correction = (total - self.total_exchange) - exchange
+        initial = before if self.initial_mass is None else self.initial_mass
+        cumulative = math.fsum([after, -initial, -total])
+        initial_scale = mass_scale if self.initial_mass_scale is None else self.initial_mass_scale
+        cumulative_tolerance = self.atol + self.rtol * max(initial_scale, mass_scale, abs(total))
+        if not np.isfinite(cumulative) or abs(cumulative) > cumulative_tolerance:
+            raise ArithmeticError("cumulative mass balance failed; step was not committed")
         wet = new[self.grid.active]
+        if self.require_nonnegative and np.any(wet < 0):
+            raise ArithmeticError("negative concentration; reduce forcing or timestep; step was not committed")
         budget = StepBudget(self.time + dt, dt, before, after, boundary, source,
                             residual, tolerance, abs(residual) <= tolerance,
                             float(wet.min()), float(wet.max()),
-                            float(np.dot(self.grid.volumes[self.grid.active], wet * wet) / 2))
+                            float(np.dot(self.grid.volumes[self.grid.active], wet * wet) / 2),
+                            float(np.max(np.abs(local_residual))), cumulative)
         if not all(np.isfinite(x) for x in (before, after, boundary, source, residual, tolerance, budget.energy)):
             raise FloatingPointError("non-finite budget; step was not committed")
         if not budget.passed:
             raise ArithmeticError(f"mass budget failed: {residual}; step was not committed")
         self.state, self.time = new, budget.time
+        self.initial_mass = initial
+        self.initial_mass_scale = initial_scale
+        self.total_exchange, self._exchange_correction = total, correction
         self.iteration += 1
         self.history.append(budget)
+        if len(self.history) > self.history_limit:
+            del self.history[0]
         return budget
 
     def run_until(self, stop_time, max_dt=0.001, max_steps=1_000_000):
