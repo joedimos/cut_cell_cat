@@ -2,7 +2,9 @@
 
 A one-dimensional, conservative finite-volume scalar diffusion research framework,
 with explicit cut-cell geometry, auditable mass budgets, diagnostic pattern search,
-and optional Lean certificates for **concrete budget snapshots**.
+optional Lean certificates for **concrete budget snapshots**, and an executable
+category-theory layer connecting cell partitions, patch fields, interface
+gluing, and conservative dynamics.
 
 The numerical architecture is referenced to **CliMA/Oceananigans.jl at
 `819a245b837041d01fcf273d74a8b45db81ea14a`**. Read the
@@ -10,6 +12,25 @@ The numerical architecture is referenced to **CliMA/Oceananigans.jl at
 [mathematical contract](docs/NUMERICS.md), and [migration notes](docs/MIGRATION.md), and [production validation contract](docs/PRODUCTION_READINESS.md).
 This is an independent Python implementation of a limited scalar-diffusion scope.
 It is not an Oceananigans port, a 3-D ocean model, or a formally verified solver.
+
+## Explore the categorical structure
+
+The [category-theory guide](docs/CATEGORY_THEORY.md) develops one connected
+example through categories, functors, natural transformations, Yoneda, universal
+constructions, adjunctions, closure monads, Kan extensions, sheaves, cospans,
+and chain maps. Exact finite constructions validate their defining laws.
+Numerical diagrams explicitly distinguish conservative aggregation from
+commuting diffusion dynamics.
+
+```sh
+python -m cutcell.category.showcase
+# After installation:
+cut-cell-category --output category-report.json
+```
+
+The report includes checked identities and a counterexample to diffusion
+naturality. See the guide for derivations, evidence, complexity limits, and an
+extension map for advanced topics that are not yet implemented.
 
 ## Install and run
 
@@ -57,6 +78,8 @@ also supported, but do not by themselves reconstruct a physical multidimensional
 
 | Layer | Responsibility |
 |---|---|
+| `cutcell/category/` | Exact finite categories, universal constructions, order adjunctions, patch sheaves, and executable tour |
+| `cutcell/categorical_numerics.py` | Incidence, dual-graph homology, coarse chain maps, weighted adjoints, and dynamics defects |
 | `cutcell/grid.py` | Cell centers, volumes, face apertures, partial-bottom geometry |
 | `cutcell/operators.py` | Shared diffusive face fluxes, boundary conditions, stability bound |
 | `cutcell/model.py` | Euler / SSPRK3, actual clock, stage-weighted mass budgets |
@@ -73,8 +96,10 @@ reported without proof credit. A successful certificate checks an exact rational
 inequality constructed from the supplied floating-point budget values. It does
 **not** prove the Python implementation, the PDE, or a categorical theory.
 
-The historical theory registry is descriptive metadata. Arbitrary products of
-neighboring fluxes are not morphism composition or a conservation law.
+The historical theory registry is descriptive metadata. The separate category
+API validates exact finite instances; its tests and mathematical derivations
+are not Lean certificates. Arbitrary products of neighboring fluxes are not
+morphism composition or a conservation law.
 
 ## Validated scope and limits
 
@@ -114,3 +139,6 @@ installation. Consult the exact commit's CI results for pass/fail evidence.
 
 Version 0.3.0 adds these controls. Successful CI validates the documented 1-D
 scope and reference cases; it is not certification for unimplemented physics.
+
+Version 0.4.0 adds the mathematical category layer and its connected showcase.
+The diffusion solver and result schema remain compatible with version 0.3.0.

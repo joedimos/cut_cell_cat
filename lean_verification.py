@@ -11,7 +11,7 @@ from enum import Enum
 import numpy as np
 
 class CategoryTheoryFramework(Enum):
-    """Categorical frameworks for verification."""
+    """Legacy descriptive tags, not implemented or verified categorical theories."""
     CUT_CELL = "cut_cell"  
     STRUCTURED_COSPAN = "structured_cospan" 
     PETRI_NET = "petri_net"  
@@ -46,7 +46,7 @@ class CategoryTheorySignature:
         return 0.3 * framework_score + 0.2 * obj_overlap + 0.3 * morph_overlap + 0.2 * cons_overlap
 
 class TheoryRegistry:
-    """Registry of categorical theory definitions."""
+    """Historical descriptive schemas, not category presentations or proofs."""
     
     def __init__(self):
         self.theories: Dict[str, CategoryTheorySignature] = {}
@@ -84,7 +84,7 @@ class TheoryRegistry:
                 "d(stock)/dt = ∑(inflows) - ∑(outflows)",
                 "flow_composition: (f ∘ g)(t) = f(g(t))"
             ],
-            conservation_properties=["total_stock", "flow_balance"]
+            conservation_properties=["closed_internal_transfers_preserve_total_stock"]
         ))
         
         # Petri net (chemical reaction) theory
@@ -98,9 +98,10 @@ class TheoryRegistry:
             ],
             composition_laws=[
                 "firing_rule: enabled(t) → fire(t)",
-                "token_conservation: ∑(tokens) = constant"
+                "marking update: m_next = m + N[:, transition] for an enabled firing",
+                "weighted conservation holds only for w with w^T N = 0"
             ],
-            conservation_properties=["token_count", "stoichiometry"]
+            conservation_properties=["stoichiometric_left_nullspace_invariants"]
         ))
         
         # Double pushout (graph rewriting) theory
@@ -113,10 +114,11 @@ class TheoryRegistry:
                 ("glue", "Interface", "Graph")
             ],
             composition_laws=[
-                "pushout_square: match ∘ glue = rewrite",
-                "interface_preservation"
+                "rule is a span L <- K -> R; a match L -> G requires a pushout complement",
+                "DPO rewriting uses two pushout squares when the gluing conditions hold",
+                "connectivity and node counts are not conserved in general"
             ],
-            conservation_properties=["connectivity", "node_types"]
+            conservation_properties=[]
         ))
     
     def register_theory(self, name: str, signature: CategoryTheorySignature):

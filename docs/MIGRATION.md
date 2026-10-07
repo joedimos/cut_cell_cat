@@ -37,3 +37,16 @@ keyword/concept retrieval, not learned semantic embedding inference.
 Future scope should add independent operator validation before advection, pressure
 projection, moving geometry, or dimensional expansion. A diffusion-only test suite
 cannot establish correctness of those future systems.
+
+## Version 0.4 categorical API
+
+Use `cutcell.category` for exact constructions and
+`cutcell.categorical_numerics` for dense numerical audit diagrams. The historical
+simulator names and `categorical_errors` alias are unchanged. `use_multiscale`
+continues to reject unsupported adaptive coupling: a conservative chain map is
+not sufficient to commute diffusion dynamics. The new `cut-cell-category` CLI
+has its own report schema, separate from solver results and Lean snapshots.
+
+Registry descriptions now state the necessary hypotheses for Petri invariants
+and DPO rewriting rather than asserting unconditional token/connectivity
+conservation. See [the mathematical guide](CATEGORY_THEORY.md).
