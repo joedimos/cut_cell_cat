@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-10-07",
+  "sources": {
+    "korn_2026": {
+      "title": "Foundations of Global Ocean Climate Modelling at all Scales",
+      "author": "Peter Korn",
+      "arxiv": "2608.25679v3",
+      "version_date": "2026-09-05",
+      "url": "https://arxiv.org/pdf/2608.25679v3",
+      "original_user_url": "https://arxiv.org/pdf/2608.25679"
+    },
+    "weathernext3": {
+      "title": "WeatherNext 3: Increasing resolution and performance of global weather models with raw observations",
+      "authors": "Stephan Rasp et al., Google DeepMind and Google Research",
+      "arxiv": "2609.03582v1",
+      "version_date": "2026-09-03",
+      "url": "https://arxiv.org/html/2609.03582v1",
+      "official_model_documentation": "https://developers.google.com/weathernext/guides/models"
+    }
+  },
+  "mapping": [
+    {"source": "korn_2026", "locator": "Section 2.2, equations (16)-(21); Section 6.2, (99)-(100)", "implementation": "cutcell.research.pressure.ColumnPressureSplit", "status": "stationary separable 2-D finite-volume specialization", "validation": "test_research_pressure.PressureTests.test_column_and_aggregated_pressure_against_independent_dense_solve"},
+    {"source": "korn_2026", "locator": "Section 6.2.2, equations (107a)-(107c)", "implementation": "cutcell.research.pressure.ColumnPressureSplit.acoustic_stage", "status": "linear constant-coefficient explicit S3-b stage, not complete AC/DC", "validation": "test_research_pressure.PressureTests.test_acoustic_wave_time_convergence_and_vertical_cfl"},
+    {"source": "korn_2026", "locator": "Section 5.2.2, equations (78)-(79), hypotheses H1-H4", "implementation": "cutcell.research.transport.consistent_tracer_step", "status": "stationary closed 1-D upwind forward-Euler specialization with supplied pseudo-mass flux", "validation": "test_research_transport.TransportTests.test_pseudo_mass_content_constants_and_bounds"},
+    {"source": "korn_2026", "locator": "Section 5.3, equations (82)-(89)", "implementation": "cutcell.research.pressure.dispersion", "status": "exact stable quadratic roots, separate asymptotic errors", "validation": "test_research_pressure.PressureTests.test_dispersion_matches_full_fourier_system"},
+    {"source": "weathernext3", "locator": "Appendix A.1.1, equations (A.4)-(A.5); Appendix A.2.1", "implementation": "cutcell.research.forecast.crps and multimodal_score", "status": "score conventions and within-modality normalization; no neural training pipeline", "validation": "test_research_forecast.ForecastScores.test_sorted_crps_against_independent_pairwise_definition"},
+    {"source": "weathernext3", "locator": "Appendix A.1.2, Global mean loss; Appendix A.2.2", "implementation": "cutcell.research.forecast.field_score", "status": "global weighted mean pooling only; no spherical sliding/max pooling", "validation": "test_research_forecast.ForecastScores.test_marginals_do_not_identify_joint_distribution"},
+    {"source": "weathernext3", "locator": "Appendix A.1.1, equation (A.2)", "implementation": "cutcell.research.forecast.ConservativeFluxEnsemble", "status": "original conservative linear functional-noise adaptation; not FGN reproduction", "validation": "test_research_forecast.ConservativeSamples.test_memberwise_mass_and_pushforward_coarse_mass"}
+  ],
+  "original_constructions": [
+    "FiniteKernel stochastic composition and strong lumpability",
+    "Boundary-zero low-rank flux perturbations around the existing scalar diffusion solver",
+    "Categorical organization of deterministic pushforward and ensemble coarsening"
+  ],
+  "not_implemented": [
+    "Global spherical ocean dynamics, nonlinear momentum, free-surface evolution or moving vertical coordinates",
+    "AC/DC option S3-a and its horizontal-only subcycling advantage",
+    "A complete coupled pseudo-density, velocity, pressure and tracer AC/DC solver",
+    "Trained WeatherNext neural architecture, weights, satellite/station ingestion or forecast skill reproduction"
+  ]
+}

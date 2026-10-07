@@ -85,3 +85,11 @@ python validation/compare_oceananigans.py oceananigans.csv
 Python-only environments intentionally skip the real-Lean unit test. The dedicated
 CI job requires `lean --version` and the strict CLI, so this skip cannot silently
 stand in for real integration validation there.
+
+
+## Research extensions in 0.5
+
+The source-pinned ocean/forecast modules are independently tested mathematical
+kernels. They do not extend this document's production claim to a global ocean
+model or trained weather model. Consult [their contract](OCEAN_WEATHER_MATHEMATICS.md)
+for the exact implemented scope, assumptions and integration gaps.

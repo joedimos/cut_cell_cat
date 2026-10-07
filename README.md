@@ -32,6 +32,25 @@ The report includes checked identities and a counterexample to diffusion
 naturality. See the guide for derivations, evidence, complexity limits, and an
 extension map for advanced topics that are not yet implemented.
 
+## Ocean and WeatherNext mathematical references
+
+Version 0.5 adds a [source-traceable research layer](docs/OCEAN_WEATHER_MATHEMATICS.md)
+referencing Korn's **2608.25679v3** and DeepMind's **WeatherNext 3,
+2609.03582v1**. It includes column pressure splitting, a linear explicit
+acoustic stage, pseudo-mass-consistent tracer transport, dispersion checks,
+probabilistic scoring, conservative functional-noise examples, and stochastic
+kernels connecting forecasts to the category layer.
+
+```sh
+python -m cutcell.research.showcase
+# After installation:
+cut-cell-research --output research-report.json
+```
+
+These are tested mathematical kernels and synthetic examples. They are not a
+complete AC/DC ocean model, trained WeatherNext implementation, or weather-skill
+reproduction. The guide maps each function to source equations and hypotheses.
+
 ## Install and run
 
 Python 3.10 or newer:

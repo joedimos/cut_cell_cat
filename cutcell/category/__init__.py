@@ -9,3 +9,4 @@ from .finite_sets import (FiniteSet, FiniteMap, all_maps, product, pair, coprodu
                          equalizer, coequalizer, exponential, curry, uncurry, Cospan)
 from .order import (FinitePoset, MonotoneMap, GaloisConnection, image_adjunction,
                     left_kan, right_kan, section_presheaf, glue_sections)
+from .stochastic import FiniteKernel

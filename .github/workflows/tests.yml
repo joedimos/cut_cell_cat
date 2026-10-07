@@ -30,6 +30,7 @@ jobs:
       - run: python -m pip install .
       - run: python -m unittest discover -s tests -v
       - run: cut-cell-category --output category-report.json
+      - run: cut-cell-research --output research-report.json
       - run: python validation/convergence.py
       - run: python validation/geometry_convergence.py
       - run: cut-cell-cat --cells 32 --steps 20 --output cutcell-results.json

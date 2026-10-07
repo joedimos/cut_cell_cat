@@ -319,3 +319,16 @@ not claim these texts verify the code.
   needed beyond the plain finite-set cospans implemented here.
 - [Numerical contract](NUMERICS.md) and
   [pinned Oceananigans source comparison](OCEANANIGANS_REFERENCE.md).
+
+
+## Probability and ocean/forecast extensions (0.5)
+
+`FiniteKernel` extends deterministic finite maps to stochastic morphisms.
+Its composition, expectation duality, independent tensor, and strong-lumpability
+defect are exercised by `tests/test_research_forecast.py`. These are floating
+probability matrices, distinct from the exact finite-set law checker.
+
+The [ocean and forecast guide](OCEAN_WEATHER_MATHEMATICS.md) connects source-pinned
+pressure and pseudo-mass transport to conservative stochastic operators and
+WeatherNext-referenced score conventions. It distinguishes source adaptations,
+original constructions, and scientific model components not yet implemented.
