@@ -1,18 +1,20 @@
 """Finite categorical semantics for selected WeatherNext 3 equations.
 
 This module does not reproduce the WeatherNext neural network. It gives exact
-finite models of two structural statements in arXiv:2609.03582v1:
+finite models of structural statements in arXiv:2609.03582v1:
 
 * Eq. (3): six-hour forecast windows form a second-order Markov process.
 * Eqs. (A.2)-(A.3): modality-specific encode/process/decode maps communicate
   through a shared latent representation, while stochasticity defines a kernel.
+* Functional-noise semantics: one sampled latent/noise state selects a coherent
+  field-valued response, rather than independent pointwise perturbations.
 
-The constructions are deliberately finite so their categorical laws can be
-checked exactly or to explicit floating tolerances in unit tests.
+The constructions are deliberately finite so categorical laws can be checked
+exactly or to explicit floating tolerances in unit tests.
 """
 from dataclasses import dataclass
 import numpy as np
-from ..category.finite_sets import FiniteSet, product
+from ..category.finite_sets import FiniteSet, FiniteMap, product
 from ..category.stochastic import FiniteKernel
 
 
@@ -82,6 +84,44 @@ class SecondOrderWeatherKernel:
             probability *= self.transition.matrix[pair_index[(a, b)], state_index[c]]
             a, b = b, c
         return float(probability)
+
+
+@dataclass(frozen=True)
+class FunctionalGeneratorKernel:
+    """Finite analogue of a functional generative forecast.
+
+    ``response`` is a deterministic map Condition×Noise -> Target. A single
+    sampled noise state is therefore shared by the whole target value. If a
+    target element represents an entire field, this construction preserves its
+    joint structure. Marginalizing the finite noise law yields a Markov kernel
+    Condition -> Target.
+
+    This captures stochastic-function semantics only. It does not implement the
+    neural conditional-normalization mechanism, transformer/GNN processor,
+    dropout, or learned WeatherNext weights.
+    """
+    condition: FiniteSet
+    noise: FiniteSet
+    target: FiniteSet
+    response: FiniteMap
+    noise_probability: np.ndarray
+
+    def __post_init__(self):
+        domain, _, _ = product(self.condition, self.noise)
+        if self.response.source != domain or self.response.target != self.target:
+            raise ValueError("response must be a deterministic map Condition×Noise -> Target")
+        probability = _distribution(self.noise_probability, len(self.noise), "noise probability")
+        probability.setflags(write=False)
+        object.__setattr__(self, "noise_probability", probability)
+
+    def kernel(self):
+        matrix = np.zeros((len(self.condition), len(self.target)), dtype=float)
+        target_index = {y: j for j, y in enumerate(self.target.elements)}
+        for i, x in enumerate(self.condition.elements):
+            for k, z in enumerate(self.noise.elements):
+                y = self.response((x, z))
+                matrix[i, target_index[y]] += self.noise_probability[k]
+        return FiniteKernel(self.condition, self.target, matrix)
 
 
 @dataclass(frozen=True)

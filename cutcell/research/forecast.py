@@ -28,8 +28,6 @@ def crps(ensemble, observation, *, fair=False):
         raise ValueError('fair CRPS needs at least two members')
     with np.errstate(over='raise', invalid='raise'):
         ordered = np.sort(x, axis=0)
-        # Sum over i<j = sum_k (2k-m+1) x_(k), k zero-based.
-        # Centering reduces cancellation for large common offsets.
         ordered = ordered-ordered[0]
         weights = (2*np.arange(m)-m+1).reshape((m,)+(1,)*(x.ndim-1))
         pair_sum = np.sum(weights*ordered, axis=0)
@@ -64,6 +62,42 @@ def field_score(ensemble, observation, weights, *, fair=False, pooled_weight=0.)
     if not all(np.isfinite(v) for v in (local, pooled, total)):
         raise FloatingPointError('field score is not finite')
     return {'marginal': local, 'pooled_mean': pooled, 'total': total}
+
+
+def pooled_crps(ensemble, observation, pools, *, reducer='mean', weights=None, fair=False):
+    """WeatherNext 3 A.2.2-style CRPS after spatial average or max pooling.
+
+    ``pools`` supplies one index collection per pooled output location. WN3 uses a
+    patch centered at every latitude-longitude grid point, with approximately
+    equi-area patches and latitude weighting. This generic routine does not invent
+    those spherical neighborhoods: callers must provide their exact pooling map
+    and weights. Pooling is applied to every member and to the observation before
+    CRPS, preserving the distinction between marginal and joint/spatial skill.
+    """
+    x, y = np.asarray(ensemble, dtype=float), np.asarray(observation, dtype=float)
+    if x.ndim != 2 or y.ndim != 1 or x.shape[1] != len(y) or x.shape[0] < 1:
+        raise ValueError('pooled fields require shapes (members, locations) and (locations,)')
+    if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+        raise ValueError('pooled CRPS inputs must be finite')
+    if reducer not in {'mean', 'max'}:
+        raise ValueError("reducer must be 'mean' or 'max'")
+    normalized_pools = []
+    for pool in pools:
+        indices = np.asarray(tuple(pool), dtype=int)
+        if indices.ndim != 1 or len(indices) == 0 or np.any(indices < 0) or np.any(indices >= len(y)):
+            raise ValueError('every pool must contain valid location indices')
+        normalized_pools.append(indices)
+    if not normalized_pools:
+        raise ValueError('at least one pool is required')
+    reduce = np.mean if reducer == 'mean' else np.max
+    pooled_x = np.stack([reduce(x[:, idx], axis=1) for idx in normalized_pools], axis=1)
+    pooled_y = np.array([reduce(y[idx]) for idx in normalized_pools], dtype=float)
+    scores = crps(pooled_x, pooled_y, fair=fair)
+    w = np.ones(len(scores)) if weights is None else weights
+    normalized_weights = spatial_weights(w, len(scores))
+    return {'pooled_values': pooled_x, 'pooled_observation': pooled_y,
+            'scores': scores, 'weighted_score': float(normalized_weights @ scores),
+            'reducer': reducer}
 
 
 def multimodal_score(modalities, *, fair=False):
@@ -109,7 +143,6 @@ class ConservativeFluxEnsemble:
             raise ValueError('face_modes must be finite with shape (n+1, latent_dimension)')
         if np.any(modes[[0, -1]] != 0) or np.any(modes[grid.apertures == 0] != 0):
             raise ValueError('modes must vanish on exterior and impermeable faces')
-        # Validate and copy diffusivity using the actual solver.
         template = DiffusionModel(grid, np.zeros(grid.size), diffusivity)
         self.grid, self.diffusivity = grid, template.operator.diffusivity
         modes.setflags(write=False)

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cut-cell-cat"
-version = "0.6.0"
-description = "Conservative cut-cell numerics with auditable categorical and probabilistic structure"
+version = "0.7.0"
+description = "Conservative cut-cell numerics with source-traceable categorical, ocean, and probabilistic structure"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24,<3"]
 

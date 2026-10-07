@@ -1,222 +1,191 @@
-# Ocean and probabilistic forecast mathematics: source contract
+# Ocean and WeatherNext mathematics: source contract
 
-The extension has two pinned primary references:
+This repository pins two primary research references:
 
-- Peter Korn, [2608.25679v3](https://arxiv.org/pdf/2608.25679v3),
-  *Foundations of Global Ocean Climate Modelling at all Scales*, 5 September 2026.
-  The user's unversioned URL resolves to this version at review time.
-- Rasp et al., [WeatherNext 3, 2609.03582v1](https://arxiv.org/html/2609.03582v1),
-  3 September 2026. DeepMind's [model documentation](https://developers.google.com/weathernext/guides/models)
-  identifies the current family member. WN3 builds on WeatherNext 2's FGN approach.
+- Peter Korn, **arXiv:2608.25679v3**, *Foundations of Global Ocean Climate Modelling at all Scales* (5 September 2026).
+- Rasp et al., **arXiv:2609.03582v1**, *WeatherNext 3: Increasing resolution and performance of global weather models with raw observations* (3 September 2026).
 
-Equation-to-function mappings, test names, versions, and explicit exclusions are
-machine-readable in [references.json](../cutcell/research/references.json).
-Nothing in the numerical kernels is a copy of a trained weather model.
+The integrated interpretation is developed in [RESEARCH_SYNTHESIS.md](RESEARCH_SYNTHESIS.md). The exact source locators, implementation symbols, validation tests, and non-claims are machine-readable in `cutcell/research/references.json`.
+
+Nothing here is a copy of a trained WeatherNext model or a complete implementation of Korn's AC/DC global ocean model.
 
 ## Source-to-implementation map
 
-| Source location | Mathematical component | Implementation / restriction |
-|---|---|---|
-| Korn §2.2 (16)–(21), §6.2 (99)–(100) | Column pressure and residual split | `ColumnPressureSplit`; fixed separable 2-D grid |
-| Korn §6.2.2 (107a–c) | Explicit acoustic Störmer–Verlet stage | `acoustic_stage`; constant coefficient S3-b only |
-| Korn §5.2.2 (78)–(79), H1–H4 | Shared pseudo-mass and tracer flux | `consistent_tracer_step`; closed stationary 1-D upwind Euler |
-| Korn §5.3 (82)–(89) | Wave dispersion | `dispersion`; real stable branches and separate asymptotic errors |
-| WN3 A.1.1 (A.4)–(A.5), A.2.1 | Fair training / empirical evaluation CRPS | `crps`, `multimodal_score`; within-modality normalization |
-| WN3 A.1.2 global mean loss, A.2.2 | Score after spatial pooling | `field_score`; global weighted mean only |
-| WN3 A.1.1 (A.2) | Shared noise in a field-valued prediction | `ConservativeFluxEnsemble`; original linear flux adaptation |
-| Original categorical extension | Kernel composition and coarse transition compatibility | `FiniteKernel`; finite stochastic matrices |
+| Source | Mathematical component | Implementation | Scope |
+|---|---|---|---|
+| Korn §2.1-2.2 (9)-(14) | thin-fluid AC calibration and pseudo-density | `thin_fluid_calibration`, `pseudo_density` | scalar calibration and density map |
+| Korn §2.2 (16)-(21), §6.2 (99)-(100) | pressure decomposition | `ColumnPressureSplit` | stationary separable 2-D specialization |
+| Korn §6.2.2 (107a-c) | explicit acoustic S3-b stage | `ColumnPressureSplit.acoustic_stage` | linear constant-coefficient stage |
+| Korn §5.2.2 (78)-(79), H1-H4 | shared pseudo-mass/tracer flux | `consistent_tracer_step` | closed stationary 1-D specialization |
+| Korn §3.1 (38)-(43) | physical tracer dissipation and numerical reconstruction sink | `flux_corrected_reconstruction`, `tracer_variance_diagnostics` | face-local finite-volume diagnostics |
+| Korn §3.1 (45) | Osborn-Cox diffusivity | `osborn_cox_diffusivity` | caller supplies the steady/local assumptions |
+| Korn §3.2 (46)-(48) | physical vs AC energy dissipation | `energy_dissipation_diagnostics` | local algebraic diagnostic; incomplete energy core |
+| Korn §3.3 (54)-(56) | q, Gamma, R_f, K_rho | `mixing_diagnostics` | separated supplied budget terms |
+| Korn §5.3 (82)-(89) | dispersion | `dispersion` | exact stable roots + distinct asymptotic errors |
+| WN3 §2.1 (1)-(3) | second-order 6-hour trajectory factorization | `SecondOrderWeatherKernel` | exact finite-state analogue |
+| WN3 §2.2, A.1.1 (A.1)-(A.3) | native modality encoders/decoders and shared processor | `MultimodalLatentDiagram` | finite compositional structure only |
+| WN3 stochastic functional generation | shared functional noise | `FunctionalGeneratorKernel` | finite shared-noise field semantics, not neural FGN |
+| WN3 A.1.1 (A.4)-(A.5), A.2.1 | CRPS conventions and multimodal loss | `crps`, `multimodal_score` | score semantics, no training pipeline |
+| WN3 A.1.2 | global mean loss | `field_score` | optional global mean term |
+| WN3 A.2.2 | average/max pooled CRPS | `pooled_crps` | caller supplies pools and latitude-like weights |
 
-WN3 trains with fair two-sample CRPS and evaluates its mixed-seed ensemble with
-empirical CRPS. Its optional global-mean term has coefficient 0.3 for selected
-gridded variables and is omitted for sparse station targets. Our functions
-expose those choices; they do not apply them indiscriminately.
+## Korn: conservative carrier and information gain
 
-## Reproduce the audit
+### Thin-fluid calibration
+
+The paper calibrates the artificial-compressibility modulus to the full-depth barotropic gravity-wave scale:
+
+\[
+\alpha=\rho_0 g H,\qquad c_{AC}=\sqrt{\alpha/\rho_0}=\sqrt{gH}.
+\]
+
+`thin_fluid_calibration` reports this pair and the corresponding barotropic Froude number. It does not choose a global ocean mesh or derive the full AC/DC timestep hierarchy.
+
+### Pseudo-density and consistent tracer transport
+
+The transport specialization uses the same integrated pseudo-mass flux for pseudo-density and tracer content. For cell pseudo-mass `m` and content `q=mC`,
+
+\[
+m^+=m+\Delta t BF,\qquad q^+=q+\Delta t B(FC_f).
+\]
+
+This makes conservation a property of a common incidence map, not a post-hoc residual. Constant tracers are preserved under the documented donor-CFL hypotheses, and block aggregation transports both conserved quantities together.
+
+### Tracer variance and numerical mixing
+
+Korn §3.1 separates explicit physical tracer dissipation from reconstruction-induced numerical mixing. The code evaluates
+
+\[
+\int_\Omega \chi\,dV=2\sum_f \kappa_f\gamma_f[C]_f^2,
+\]
+
+and
+
+\[
+D_{num}=-\sum_f \Phi_f[C]_f\left((RC)_f-\langle C\rangle_f\right).
+\]
+
+The pseudo-density-weighted variance budget is
+
+\[
+\frac{dV_h}{dt}=-\rho_0D_{num}-\frac{\rho_0}{2}\int_\Omega\chi\,dV.
+\]
+
+For centered reconstruction, `D_num=0`. For upwind,
+
+\[
+D_{num}=\frac12\sum_f|\Phi_f|[C]_f^2.
+\]
+
+For the limited upwind/centered blend,
+
+\[
+D_{num}=\frac12\sum_f(1-\lambda_f)|\Phi_f|[C]_f^2.
+\]
+
+The tests verify these identities directly. A general reconstruction may have either sign, and the API does not clip that diagnostic to force dissipation.
+
+`osborn_cox_diffusivity` uses only the explicit physical `chi` contribution. The numerical sink is deliberately excluded, following the paper's central distinction between diagnosed physical mixing and discretization removal.
+
+### Energy dissipation and mixing efficiency
+
+`energy_dissipation_diagnostics` evaluates separate discrete analogues of Korn equations (46) and (47): rotational viscous dissipation is physical, whereas divergence damping is the artificial-compressibility reservoir.
+
+`mixing_diagnostics` then reports the contamination ratio
+
+\[
+q=\frac{\epsilon_c+|E_{adv}|+|r|}{\epsilon},
+\]
+
+and the related mixing quantities
+
+\[
+\Gamma=\frac{\epsilon_b}{\epsilon},\qquad
+R_f=\frac{\epsilon_b}{\epsilon_b+\epsilon},\qquad
+K_\rho=\frac{\epsilon_b}{N^2}.
+\]
+
+The full mimetic momentum/energy discretization is not implemented, so `E_adv` and the time-integration residual remain explicit inputs.
+
+## WeatherNext 3: trajectory, modalities, stochastic functions, and scores
+
+### Second-order trajectory law
+
+WN3's autoregressive trajectory is second-order in six-hour windows. The finite implementation therefore uses
+
+\[
+K:X\times X\to X
+\]
+
+and the pair-state lift
+
+\[
+\widehat K((a,b),(b,c))=K((a,b),c).
+\]
+
+This is an exact finite analogue of the factorization in WN3 equation (3). It avoids replacing the paper's second-order process with an unjustified first-order kernel on `X`.
+
+### Native-resolution modalities through one processor
+
+WN3 uses separate encoders and decoders around a shared processor. `MultimodalLatentDiagram` represents
+
+\[
+M_i\xrightarrow{E_i}Z\xrightarrow{P}Z\xrightarrow{D_j}M_j.
+\]
+
+The repository explicitly measures two possible failures:
+
+- decoder/encoder round trips need not be identities;
+- fine/coarse representation maps need not commute with processed dynamics.
+
+Thus a shared latent processor is a compositional architecture, not a proof of exact resolution naturality.
+
+### Shared functional noise
+
+`FunctionalGeneratorKernel` begins with a deterministic finite map
+
+\[
+G:\mathrm{Condition}\times\mathrm{Noise}\to\mathrm{Target}
+\]
+
+and marginalizes a supplied noise law. If a target element represents a full spatial field, one noise draw selects one whole field. This captures the distinction between a stochastic function/field and independent pointwise random variables.
+
+It does **not** implement WN3's learned FGN conditional normalization, neural processor, dropout, or learned weights.
+
+### CRPS and pooled spatial evaluation
+
+`crps` implements empirical evaluation CRPS and the fair alternative. `multimodal_score` normalizes within each modality before applying modality weights. `field_score` optionally adds the globally pooled mean term used for selected WN3 gridded targets.
+
+`pooled_crps` implements the evaluation order in WN3 Appendix A.2.2: every ensemble member and the observation are first average- or max-pooled, then CRPS is computed, then pooled-location scores are spatially weighted.
+
+WN3 defines approximately equi-area latitude-longitude patches centered at every grid point and applies latitude weighting to the final spatial average. This library requires callers to supply those pools/weights explicitly rather than fabricating spherical geometry from a 1-D example.
+
+## Categorical synthesis
+
+The repository does not claim that Korn or WeatherNext 3 are category-theory papers. Category theory is used here to make compatibility statements precise:
+
+- deterministic numerical maps embed into stochastic kernels;
+- WN3 second-order evolution becomes first-order on a product object;
+- multimodal maps factor through a common latent object;
+- functional noise is marginalization over a shared noise object;
+- autonomous stochastic coarse dynamics require the strong-lumpability square `KQ=QKc`;
+- conservative pseudo-density/tracer aggregation is a chain-map statement;
+- pooled scores factor through spatial observables and answer a different question from pointwise marginals.
+
+Each claimed commuting law has a corresponding test; where no theorem is justified, the code exposes a defect instead.
+
+## Reproduce the audits
 
 ```sh
 python -m pip install .
-cut-cell-research --output research-report.json
 python -m unittest discover -s tests -p 'test_research_*.py' -v
+cut-cell-research --output research-report.json
 ```
 
-From a checkout use `python -m cutcell.research.showcase`. Every reported forecast
-score is synthetic, on a scalar diffusion example. It measures no real weather
-skill. The new modules leave the existing diffusion solver and CLI unchanged.
+The report is synthetic. It is a mathematical audit of implemented identities and abstractions, not a weather-skill or ocean-climate benchmark.
 
-## Discrete pressure contract
+## Work still required
 
-`ColumnPressureSplit(x_faces,z_faces)` stores an `(nx,nz)` field. Coordinates
-increase left-to-right and bottom-to-top. Internal pressure gradients use
-center distances; divergence uses cell widths. Side and bottom normal gradients
-vanish; the top pressure is zero using its actual center-to-face distance.
-These choices define linear maps Gx,Gz,Dx,Dz with
+A genuine AC/DC ocean implementation still requires nonlinear momentum, Coriolis and buoyancy coupling, free-surface evolution, the complete mimetic C-grid operator suite, coupled pressure/pseudo-density synchronization, and the benchmark/performance experiments of Korn Sections 7-8.
 
-\[
-L_H=D_xG_x,\qquad L_z=D_zG_z,\qquad L=L_H+L_z.
-\]
-
-The column calculation solves `Lz q=S`, where q is pressure divided by reference
-density. It returns `S-Lq` and independently checks equality with `-LHq`.
-If a correction e satisfies `Le=S-Lq`, then `L(q+e)=S`. This algebra is tested
-against an independently assembled dense full solve; the dense solve is a test
-oracle, not an operation in `split()`.
-
-For the code's vertical discretization, `-Mz Lz` has positive diagonal and
-negative adjacent off-diagonal entries. Its quadratic form is a sum of weighted
-squared adjacent differences plus the top-boundary square, hence positive
-definite. Batched Thomas elimination solves each column in O(nz), with total
-O(nx*nz) storage/work. This differs from assembling a full global inverse.
-The field geometry here is rectangular, not a global sphere or a moving cut mesh.
-
-### Explicit acoustic stage
-
-Using p=psi/rho0 and a=alpha/rho0, the implementation advances
-`p_dot=-a Dv`, `v_dot=-Gp` by a pressure half-step, velocity step, and pressure
-half-step. This is a linear, isolated stage. Its eigenmodes satisfy
-`p_ddot=a Lp` and have squared frequencies from `a*(-L)`.
-
-An absolute row-sum bound Lambda for `-L` gives a sufficient substep condition
-
-\[
-\delta t^2 a\Lambda<4.
-\]
-
-The code picks a strictly interior safety factor, subcycles over exactly the
-requested interval, and caps the permitted work. Both directions contribute;
-refining the vertical spacing increases the work. It does not claim the
-horizontal-only restriction associated with the unimplemented S3-a split.
-Because this is an undamped oscillator, it is reversible and need not reduce
-divergence monotonically. Calling it an iterative Poisson convergence algorithm
-would be wrong. The top acoustic boundary is the same zero-pressure boundary;
-there is no prognostic free-surface displacement in this example.
-
-Tests compare a low-frequency mode with its analytic cosine evolution and
-verify second-order time refinement and time reversal. Spatial tests recover a
-manufactured column pressure at approximately second order.
-
-### Dispersion: exact roots versus asymptotics
-
-The implementation computes the two roots for frequency squared of the source
-biquadratics. It uses the large root followed by their product to recover the
-small root, avoiding subtractive cancellation. Nonfinite inputs, zero vertical
-wavenumber, complex branches, and negative squared frequencies are rejected.
-
-A separate test constructs the five-variable Fourier generator for
-(u,v,w,buoyancy,p), computes its eigenvalues, and compares the oscillation
-frequencies. Reported leading errors are explicitly **asymptotic**. They are not
-substituted for exact differences: the test verifies their discrepancy and
-1/alpha refinement. The alpha argument is a squared-speed coefficient in this
-normalized equation; no automatic mesh-dependent calibration is inferred from
-other coefficient conventions in the paper.
-
-## Consistent transport is a commuting conservation diagram
-
-Let B be the existing signed incidence, positive for incoming face flux, and
-let m_i=V_i*r_i, with positive relative pseudo-density r. The new transport
-kernel uses one supplied integrated pseudo-mass flux F for both quantities:
-
-\[
-m^+=m+\Delta t BF,\qquad
-q^+=mC+\Delta t B(F C_f),\qquad C^+=q^+/m^+.
-\]
-
-Closed faces have zero F. The same upwind donor reconstruction and timestep are
-used throughout. Consequently, summing the incidence rows proves conservation
-of total m and total q. For constant C=c, q^+=c*m^+, so constants remain
-constant even when the velocity has nonzero divergence.
-
-The strict outgoing-flux bound leaves positive donor mass. Each updated tracer
-is a convex combination of the old local/donor values, so bounds are preserved.
-Jensen's inequality applied to these combinations and summed over cells proves
-nonincrease of the pseudo-mass-weighted second moment. No clipping is used.
-The tests include disconnected wet regions, solids, nonuniform volumes, and
-repeated steps.
-
-For any block aggregation A, the inherited identity `AB=BcQ` applies separately
-to m and q. Coarse concentration is therefore **Aq/Am**, not an unweighted
-average. This is the categorical content: a compatible map transports the two
-conservation laws together. Physical content `sum(V*C)` is another quantity;
-a two-cell counterexample in the report demonstrates that it can change while
-pseudo-mass content is exactly conserved. The kernel does not assert any global
-long-time physical-error bound beyond its stated hypotheses.
-
-## Probabilistic operators and conservative support
-
-A field-valued conditional prediction is a probability kernel K(c,dc'). The
-new fixed-mode example constructs samples with
-
-\[
-c'=\Phi_{\Delta t}(c)+\Delta t M^{-1}B\,W\xi.
-\]
-
-Here Phi is one actual SSPRK3 solver step, with its returned stable timestep;
-W supplies zero flux at external and impermeable faces. One low-dimensional
-noise vector drives the whole field. Therefore every member preserves each
-closed component's scalar mass, regardless of noise distribution, up to roundoff.
-Its covariance is spatially coupled and has rank bounded by the noise dimension.
-The caller supplies noise, making sampling and reproducibility explicit.
-
-This construction is an original constrained stochastic residual. It has no
-learned transformer, normalization-layer noise injection, observation encoder,
-or neural training. Gaussian perturbations do not guarantee positivity;
-`require_nonnegative=True` rejects violations and never clips samples to claim
-conservation. Trained forecast skill requires data and a separate evaluation.
-
-`FiniteKernel` represents the finite-distribution Kleisli category:
-row-stochastic matrices compose by multiplication, deterministic maps embed as
-one-hot kernels, and tensor products represent independent coupling. A prior
-pushes forward as pK; observables pull back by Kf. The identity
-`(pK)f=p(Kf)` is tested, as are composition and the tower property.
-
-For a deterministic partition Q, a coarse transition Kc is compatible only if
-
-\[
-K_fQ=QK_c.
-\]
-
-This is strong lumpability. `lumpability_defect` reports its failure. Merely
-preserving mass or applying restriction to each forecast sample does not prove
-that a closed Markov model exists on the coarse state. An ensemble may be pushed
-forward consistently even when an autonomous coarse dynamic does not exist.
-
-## Scores that preserve the intended statistical question
-
-For scalar observations, empirical CRPS evaluates the finite forecast actually
-delivered. Fair CRPS changes the pairwise denominator from m² to m(m-1),
-requiring iid sampling for its unbiased population interpretation. The sorted
-implementation avoids allocating an m-by-m pairwise array. Tests compare it
-with an independent pairwise formula, including one-member, two-member,
-replicated-member, and translation cases.
-
-`multimodal_score` computes a weighted sum of separately normalized modality
-scores, so duplicating grid locations with proportionate weights cannot drown
-out stations. Boolean masks are applied before scoring; an entirely missing
-modality is rejected instead of silently changing the loss definition. Variable
-units/scales must be normalized by the caller; combining raw unlike units is
-not automatic.
-
-Pooling is applied **to each ensemble member and the observation before
-scoring**, not to pointwise scores. Two joint ensembles with identical marginals
-but opposite spatial dependence demonstrate why this matters. A pooled mean
-still does not identify every feature of a joint law; it is one additional
-observable, not a proof of calibration or physical consistency. Spatial weights
-are supplied explicitly: volume weights suit this scalar example, area weights
-suit a spherical field, and station weights answer a different sampling question.
-
-## Work still required for a coupled scientific model
-
-The available kernels now have equations, hypotheses, independent oracles, and
-source locators. Further integration must supply nonlinear momentum, Coriolis
-and buoyancy coupling, pressure/pseudo-density synchronization, consistent
-integrated acoustic tracer fluxes, free-surface evolution, geometric operators,
-and suitable benchmark cases. The independent transport and acoustic components
-must not be advertised as an end-to-end AC/DC implementation.
-
-A WeatherNext-scale extension separately requires licensed and versioned data,
-multimodal observation processing, the neural architecture and optimization,
-training/inference uncertainty semantics, geographical/time holdouts, joint and
-marginal calibration, extremes, and operational latency evaluation. None of the
-paper's forecast-accuracy or hardware-speed claims transfer to these kernels.
-
-See [CATEGORY_THEORY.md](CATEGORY_THEORY.md) for the exact finite category layer
-and [NUMERICS.md](NUMERICS.md) for the existing scalar solver's contract.
+A genuine WeatherNext 3 reproduction still requires the trained neural architecture and weights, raw multimodal observation processing, continuous station-coordinate head, stochastic conditional-normalization mechanism, dropout/seed uncertainty, training curriculum, versioned datasets, operational ensemble construction, geographical holdouts, and forecast-skill evaluation.

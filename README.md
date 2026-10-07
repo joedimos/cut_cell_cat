@@ -1,180 +1,261 @@
 # cut_cell_cat
 
-A one-dimensional, conservative finite-volume scalar diffusion research framework,
-with explicit cut-cell geometry, auditable mass budgets, diagnostic pattern search,
-optional Lean certificates for **concrete budget snapshots**, and an executable
-category-theory layer connecting cell partitions, patch fields, interface
-gluing, conservative dynamics, and finite stochastic kernels.
+`cut_cell_cat` is a conservative finite-volume research framework with an executable category-theory layer and source-traceable mathematical interfaces to:
 
-The numerical architecture is referenced to **CliMA/Oceananigans.jl at
-`819a245b837041d01fcf273d74a8b45db81ea14a`**. Read the
-[source-by-source comparison](docs/OCEANANIGANS_REFERENCE.md),
-[mathematical contract](docs/NUMERICS.md), [migration notes](docs/MIGRATION.md),
-and [production validation contract](docs/PRODUCTION_READINESS.md).
-This is an independent Python implementation of a limited scalar-diffusion scope.
-It is not an Oceananigans port, a 3-D ocean model, or a formally verified solver.
+- **CliMA/Oceananigans.jl** for the bounded scalar-diffusion numerical architecture,
+- **Peter Korn, arXiv:2608.25679v3**, *Foundations of Global Ocean Climate Modelling at all Scales*, for selected AC/DC ocean mathematics,
+- **WeatherNext 3, arXiv:2609.03582v1**, for selected probabilistic trajectory, multimodal, functional-noise, and forecast-scoring structure.
 
-## Explore the categorical structure
+The repository is intentionally explicit about scope. It is **not** an Oceananigans port, a complete AC/DC ocean circulation model, a trained WeatherNext implementation, or a formal proof of either paper.
 
-The [category-theory guide](docs/CATEGORY_THEORY.md) develops one connected
-example through categories, functors, natural transformations, Yoneda, universal
-constructions, adjunctions, closure monads, Kan extensions, sheaves, cospans,
-and chain maps. Exact finite constructions validate their defining laws.
-Numerical diagrams explicitly distinguish conservative aggregation from
-commuting diffusion dynamics.
+## Integrated mathematical architecture
+
+The current release treats three kinds of maps separately:
+
+1. **Deterministic conservative dynamics** — finite-volume updates and exact finite-set maps.
+2. **Probabilistic dynamics** — finite Markov kernels, Bayesian inversion, shared functional noise, and second-order autoregressive weather trajectories.
+3. **Representation maps** — cell coarsening, native-resolution modality encoders/decoders, latent processors, and spatial pooling operators.
+
+This separation matters because conservation, stochastic calibration, and cross-resolution consistency are different mathematical claims.
+
+Read:
+
+- [Research synthesis](docs/RESEARCH_SYNTHESIS.md)
+- [Ocean + WeatherNext source contract](docs/OCEAN_WEATHER_MATHEMATICS.md)
+- [Finite Markov-category model](docs/MARKOV_CATEGORY.md)
+- [Category-theory guide](docs/CATEGORY_THEORY.md)
+- [Numerical contract](docs/NUMERICS.md)
+- [Oceananigans reference map](docs/OCEANANIGANS_REFERENCE.md)
+- [Production validation contract](docs/PRODUCTION_READINESS.md)
+
+The equation-to-code mapping is machine-readable in `cutcell/research/references.json`.
+
+## Category theory
+
+The category layer covers finite categories, functors, natural transformations, Yoneda, finite limits/colimits, cartesian closure, cospans, adjunctions, idempotent monads/comonads, finite-poset Kan extensions, presheaf/sheaf examples, chain complexes, weighted coarse maps, and finite Markov kernels.
 
 ```sh
 python -m cutcell.category.showcase
-# After installation:
+# installed entry point
 cut-cell-category --output category-report.json
 ```
 
-The report includes checked identities and a counterexample to diffusion
-naturality. See the guide for derivations, evidence, complexity limits, and an
-extension map for advanced topics that are not yet implemented.
+Important distinctions are enforced by tests:
 
-### Finite Markov-category structure
+- conservative aggregation does not imply that diffusion commutes with coarsening;
+- pushing a stochastic ensemble through a partition does not imply a closed coarse Markov model;
+- an autonomous coarse stochastic model exists only when the strong-lumpability square `KQ = QKc` holds;
+- stochastic kernels preserve discard, while copy preservation characterizes deterministic behavior in the finite examples.
 
-Version 0.6 extends the stochastic kernel layer into an explicit
-[finite Markov-category model](docs/MARKOV_CATEGORY.md): states `I -> X`,
-copy/discard maps, tensor symmetry and associators, deterministic-kernel tests,
-Bayesian inversion with explicit null-event policy, likelihood conditioning,
-and exact strong-lumpability quotients. The tests check when stochastic diagrams
-really commute rather than assuming that probabilistic coarse graining is valid.
+## WeatherNext 3 structure
 
-This is a finite, auditable categorical abstraction. It does not claim that
-WeatherNext itself is a Markov-category implementation or that an arbitrary
-ocean discretization is strongly lumpable.
+The WeatherNext layer now reflects substantially more than CRPS.
 
-## Ocean and WeatherNext mathematical references
+### Second-order trajectory factorization
 
-Version 0.5 adds a [source-traceable research layer](docs/OCEAN_WEATHER_MATHEMATICS.md)
-referencing Korn's **2608.25679v3** and DeepMind's **WeatherNext 3,
-2609.03582v1**. It includes column pressure splitting, a linear explicit
-acoustic stage, pseudo-mass-consistent tracer transport, dispersion checks,
-probabilistic scoring, conservative functional-noise examples, and stochastic
-kernels connecting forecasts to the category layer.
+WeatherNext 3 models the forecast trajectory as a **second-order Markov process over six-hour windows**. `SecondOrderWeatherKernel` represents
+
+```text
+K : X × X -> X
+```
+
+and lifts it to a first-order kernel on pair states:
+
+```text
+Khat((a,b),(b,c)) = K((a,b),c).
+```
+
+This is the finite analogue of the factorization in WeatherNext 3 equation (3). The code therefore does not silently treat WN3 as first-order on a single forecast window.
+
+### Multimodal native-resolution diagram
+
+`MultimodalLatentDiagram` represents the structural form
+
+```text
+native modality_i -> shared latent processor -> native modality_j
+```
+
+with separate encoders and decoders around one shared latent object. Round-trip and cross-resolution naturality defects are measurable; sharing a processor does not make those diagrams commute automatically.
+
+### Functional stochasticity
+
+`FunctionalGeneratorKernel` models a finite shared-noise construction
+
+```text
+Condition × Noise -> complete Target field
+```
+
+and marginalizes the noise law to obtain a stochastic kernel. One noise draw selects one complete target field/function, preserving the distinction between functional/joint stochasticity and independent pointwise perturbations.
+
+This is a categorical abstraction of functional-noise semantics, **not** the learned FGN neural architecture, conditional normalization, transformer/GNN processor, seed ensemble, or epistemic dropout used by WeatherNext.
+
+### WeatherNext scoring
+
+The research layer includes:
+
+- empirical and fair CRPS,
+- separately normalized multimodal scoring,
+- optional global-mean CRPS term for selected gridded variables,
+- **average- and max-pooled CRPS** after spatial pooling.
+
+`pooled_crps` requires explicit pool neighborhoods and spatial weights. WeatherNext 3 uses approximately equi-area latitude-longitude patches centered at every grid point and latitude weighting in the final average; this repository does not invent those geographical neighborhoods for a 1-D scalar grid.
+
+## Korn AC/DC mathematics
+
+The Korn layer now spans the main mathematical themes relevant to this repository rather than only pressure splitting.
+
+### Thin-fluid calibration and pseudo-density
+
+`thin_fluid_calibration` implements the paper's calibration
+
+```text
+alpha = rho0 g H
+c_AC = sqrt(alpha / rho0) = sqrt(g H)
+```
+
+and reports the associated barotropic Froude number. `pseudo_density` implements the corresponding artificial-compressibility density map used by the transport specialization.
+
+### Pressure split and acoustic stage
+
+`ColumnPressureSplit` implements a stationary separable 2-D specialization of the hydrostatic/non-hydrostatic pressure decomposition, and its acoustic stage implements the tested constant-coefficient S3-b Störmer-Verlet specialization.
+
+`dispersion` evaluates the corresponding stable dispersion branches and keeps exact roots separate from asymptotic errors.
+
+### Consistent pseudo-mass/tracer transport
+
+`consistent_tracer_step` advances pseudo-mass and tracer content with the same pseudo-mass flux:
+
+```text
+m+ = m + dt B F
+q+ = q + dt B(F C_f)
+C+ = q+ / m+
+```
+
+This yields an actual conservation diagram. Coarse concentration is aggregate content divided by aggregate pseudo-mass, not an unweighted average.
+
+### Tracer variance and numerical mixing
+
+`tracer_variance_diagnostics` implements Korn equations (38)-(43):
+
+```text
+∫ chi dV = 2 Σ_f kappa_f gamma_f [C]_f^2
+D_num = -Σ_f Phi_f [C]_f ((RC)_f - <C>_f)
+```
+
+and the pseudo-density-weighted variance tendency
+
+```text
+dV_h/dt = -rho0 D_num - rho0/2 ∫ chi dV.
+```
+
+The implementation distinguishes centered, upwind, and flux-corrected reconstruction. Numerical mixing is computed face-by-face rather than inferred from the residual of a global budget.
+
+`osborn_cox_diffusivity` uses the explicit physical `chi` term only, excluding the numerical reconstruction sink.
+
+### Physical versus AC energy dissipation
+
+`energy_dissipation_diagnostics` keeps the paper's rotational viscous dissipation and divergence/compressibility dissipation as separate reservoirs. The physical denominator used by mixing efficiency is therefore not automatically inflated by AC damping.
+
+`mixing_diagnostics` exposes:
+
+- numerical contamination ratio `q`,
+- flux coefficient `Gamma = epsilon_b / epsilon`,
+- flux Richardson number `R_f = epsilon_b / (epsilon_b + epsilon)`,
+- diapycnal diffusivity `K_rho = epsilon_b / N^2`.
+
+Advection mismatch and time-integration closure residual remain explicit inputs because the full mimetic AC/DC energy operator is not implemented here.
+
+## Research showcase
 
 ```sh
-python -m cutcell.research.showcase
-# After installation:
+python -m pip install .
 cut-cell-research --output research-report.json
 ```
 
-These are tested mathematical kernels and synthetic examples. They are not a
-complete AC/DC ocean model, trained WeatherNext implementation, or weather-skill
-reproduction. The guide maps each function to source equations and hypotheses.
+The report exercises:
 
-## Install and run
+- pressure splitting and acoustic residuals,
+- Korn thin-fluid calibration,
+- tracer-variance and energy-dissipation diagnostics,
+- mixing-efficiency quantities,
+- second-order WeatherNext trajectory semantics,
+- shared functional-noise kernels,
+- marginal and pooled forecast scores,
+- conservative stochastic samples,
+- stochastic strong-lumpability diagnostics.
+
+All forecast scores are synthetic. They are **not WeatherNext skill measurements**.
+
+## Install and validate
 
 Python 3.10 or newer:
 
 ```sh
 python -m pip install .
-cut-cell-cat --cells 64 --steps 100 --method ssprk3 --output results.json
 python -m unittest discover -s tests -v
 python validation/convergence.py
+cut-cell-cat --cells 64 --steps 100 --method ssprk3 --output results.json
+cut-cell-category --output category-report.json
+cut-cell-research --output research-report.json
 ```
 
-From a checkout, `python main.py` is also supported. Plotting is optional:
+Plotting is optional:
 
 ```sh
 python -m pip install '.[plot]'
 cut-cell-cat --plot simulation.png
 ```
 
-Results contain geometry, all n+1 face fluxes, actual elapsed time, per-step
-boundary/source exchanges, tolerances, residuals, verification status, and the
-upstream reference commit. `--dt` is a maximum requested step; stability can reduce
-it. `--steps` counts accepted steps, not a prescribed elapsed duration.
+## Core numerical scope
 
-## Partial-bottom example
+The production scalar solver provides:
 
-```python
-import numpy as np
-from cutcell import CutCellGrid, DiffusionModel
+- bounded 1-D finite-volume scalar diffusion,
+- nonuniform volumes and face diffusivities,
+- explicit cut-cell geometry and partial-bottom examples,
+- zero-flux, prescribed-flux, and Dirichlet outer boundaries,
+- stationary sources,
+- forward Euler and SSPRK3,
+- small-cell stability control,
+- local/global/cumulative mass budgets,
+- optional exact-rational Lean certificates of supplied budget snapshots,
+- atomic result export.
 
-grid = CutCellGrid.partial_bottom(np.linspace(0, 1, 65), bottom=0.233,
-                                  minimum_fraction=0.2)
-initial = np.exp(-((grid.centers - 0.6) / 0.1)**2)
-model = DiffusionModel(grid, initial, diffusivity=0.1)
-model.run_until(0.02, max_dt=0.001)
-print(model.time, model.mass(), model.history[-1].residual)
-```
-
-The bottom is impermeable. Below-bottom cells are inactive. Tiny bottom cells
-are enlarged to the requested minimum fraction, changing the numerical bottom;
-inspect returned volumes and centers. Generic fractions and face apertures are
-also supported, but do not by themselves reconstruct a physical multidimensional cut.
+Closed unforced diffusion preserves weighted mass, respects the documented bound-preserving conditions, and dissipates weighted quadratic energy under the stated timestep restriction.
 
 ## Architecture
 
 | Layer | Responsibility |
 |---|---|
-| `cutcell/category/` | Exact finite categories, universal constructions, order adjunctions, patch sheaves, cospans, finite Markov kernels, and executable tour |
-| `cutcell/categorical_numerics.py` | Incidence, dual-graph homology, coarse chain maps, weighted adjoints, and dynamics defects |
-| `cutcell/grid.py` | Cell centers, volumes, face apertures, partial-bottom geometry |
-| `cutcell/operators.py` | Shared diffusive face fluxes, boundary conditions, stability bound |
-| `cutcell/model.py` | Euler / SSPRK3, actual clock, stage-weighted mass budgets |
-| `lean_verification.py` | Numerical budget checks and optional Lean snapshot certificates |
-| `verified_simulator.py` | Compatibility facade, results export, optional plots |
-| `knowledge_graph.py`, `semantic_search.py` | Bounded diagnostic observations and deterministic retrieval |
-| `tests/`, `validation/` | Invariant tests, analytic convergence, optional upstream comparison |
+| `cutcell/category/` | Finite categories, universal constructions, order structures, sheaves, cospans, finite Markov kernels |
+| `cutcell/categorical_numerics.py` | Incidence, homology, chain maps, weighted coarse maps, dynamics defects |
+| `cutcell/research/weathernext.py` | Second-order trajectory kernels, functional-noise semantics, multimodal latent diagrams |
+| `cutcell/research/forecast.py` | CRPS, multimodal/global-mean scores, pooled CRPS, conservative stochastic residual example |
+| `cutcell/research/ocean_diagnostics.py` | Korn thin-fluid, variance, physical/compressibility dissipation, mixing diagnostics |
+| `cutcell/research/pressure.py` | Column pressure split, acoustic stage, dispersion |
+| `cutcell/research/transport.py` | Pseudo-density and consistent tracer transport |
+| `cutcell/grid.py`, `operators.py`, `model.py` | Scalar finite-volume runtime |
+| `lean_verification.py` | Optional snapshot certificates; not a proof of the solver or papers |
+| `tests/`, `validation/` | Mathematical law tests, numerical invariants, convergence and upstream checks |
 
-## Verification meaning
+## Explicit non-claims
 
-A passing numerical budget is never counted as a Lean theorem. `--lean` requests
-an installed Lean executable; missing binaries, timeouts, errors, or warnings are
-reported without proof credit. A successful certificate checks an exact rational
-inequality constructed from the supplied floating-point budget values. It does
-**not** prove the Python implementation, the PDE, or a categorical theory.
+The repository does not currently implement:
 
-The historical theory registry is descriptive metadata. The separate category
-API validates exact finite instances; its tests and mathematical derivations
-are not Lean certificates. Arbitrary products of neighboring fluxes are not
-morphism composition or a conservation law.
+- global spherical ocean circulation,
+- full nonlinear AC/DC momentum, Coriolis/buoyancy coupling, moving coordinates, or free-surface dynamics,
+- Korn's full mimetic C-grid energy system or Section 7-8 benchmark/performance reproduction,
+- WeatherNext 3 neural architecture, trained weights, raw satellite/station data ingestion, continuous coordinate-conditioned station head, training curriculum, or operational ensemble,
+- WeatherNext's reported forecast accuracy or hardware performance,
+- automatic construction of approximately equi-area spherical pooling windows,
+- proof that learned WeatherNext heads satisfy exact categorical naturality,
+- proof that arbitrary ocean coarse-graining is strongly lumpable.
 
-## Validated scope and limits
+These limits are part of the mathematical contract, not deferred assumptions.
 
-- Bounded 1-D scalar diffusion; nonuniform volumes and face diffusivities.
-- Zero-flux, prescribed-flux, and Dirichlet outer boundaries; stationary sources.
-- Shared internal flux cancellation, weighted mass conservation, no state clipping.
-- Small-cell stability control; SSPRK3 and forward Euler.
-- Closed unforced diffusion preserves bounds and dissipates weighted quadratic energy
-  under the stated stability condition. Sources and prescribed fluxes can remove
-  enough mass to make concentrations negative; there is no artificial clipping.
-- No advection, pressure projection, velocity dynamics, GPU execution, moving
-  boundaries, periodic topology, or adaptive multiscale coupling yet.
-- Python tests and analytic convergence run on Linux, Windows, and macOS in CI.
-  Separate release jobs install and run real Julia/Oceananigans and Lean.
+## Version notes
 
-## Optional direct Oceananigans comparison
-
-```sh
-julia validation/oceananigans_reference.jl /tmp/oceananigans.csv
-python validation/compare_oceananigans.py /tmp/oceananigans.csv
-```
-
-The Julia script installs the exact referenced commit into a temporary Julia
-project and writes a bounded 1-D cosine-diffusion reference. This needs network
-access and may take several minutes. The Python comparison requires the pinned
-commit in the CSV header and tests the full profile and elapsed time. It runs in the dedicated CI job; the local development environment has no Julia
-installation. Consult the exact commit's CI results for pass/fail evidence.
-
-## Runtime policies
-
-- Every step enforces local, global, and cumulative mass budgets.
-- `--nonnegative` rejects negative concentrations, including forcing-induced negatives.
-- `--require-lean` requires real certificates and exits nonzero on failure.
-- `--history-limit 10000` bounds retained diagnostics; total step/certificate counts
-  and the cumulative ledger are independent of retention.
-- JSON results include full numerical configuration and are replaced atomically.
-
-Version 0.3.0 adds these controls. Successful CI validates the documented 1-D
-scope and reference cases; it is not certification for unimplemented physics.
-
-Version 0.4.0 adds the mathematical category layer and its connected showcase.
-Version 0.5.0 adds source-traceable Korn/WeatherNext research mathematics.
-Version 0.6.0 adds the finite Markov-category, Bayesian inversion, and exact
-strong-lumpability layer. The diffusion solver and result schema remain compatible
-with version 0.3.0.
+- **0.4.0** — executable finite category-theory layer.
+- **0.5.0** — first source-traceable Korn/WeatherNext research kernels.
+- **0.6.0** — finite Markov-category, Bayesian inversion, and strong-lumpability layer.
+- **0.7.0** — integrated Korn/WeatherNext synthesis: second-order weather kernels, multimodal latent diagrams, functional-noise semantics, pooled CRPS, thin-fluid calibration, tracer-variance/numerical-mixing separation, physical/compressibility energy diagnostics, and mixing-efficiency observables.

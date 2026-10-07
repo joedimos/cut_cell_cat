@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "reviewed_on": "2026-10-07",
   "sources": {
     "korn_2026": {
@@ -20,23 +20,37 @@
     }
   },
   "mapping": [
-    {"source": "korn_2026", "locator": "Section 2.2, equations (16)-(21); Section 6.2, (99)-(100)", "implementation": "cutcell.research.pressure.ColumnPressureSplit", "status": "stationary separable 2-D finite-volume specialization", "validation": "test_research_pressure.PressureTests.test_column_and_aggregated_pressure_against_independent_dense_solve"},
-    {"source": "korn_2026", "locator": "Section 6.2.2, equations (107a)-(107c)", "implementation": "cutcell.research.pressure.ColumnPressureSplit.acoustic_stage", "status": "linear constant-coefficient explicit S3-b stage, not complete AC/DC", "validation": "test_research_pressure.PressureTests.test_acoustic_wave_time_convergence_and_vertical_cfl"},
-    {"source": "korn_2026", "locator": "Section 5.2.2, equations (78)-(79), hypotheses H1-H4", "implementation": "cutcell.research.transport.consistent_tracer_step", "status": "stationary closed 1-D upwind forward-Euler specialization with supplied pseudo-mass flux", "validation": "test_research_transport.TransportTests.test_pseudo_mass_content_constants_and_bounds"},
-    {"source": "korn_2026", "locator": "Section 5.3, equations (82)-(89)", "implementation": "cutcell.research.pressure.dispersion", "status": "exact stable quadratic roots, separate asymptotic errors", "validation": "test_research_pressure.PressureTests.test_dispersion_matches_full_fourier_system"},
-    {"source": "weathernext3", "locator": "Appendix A.1.1, equations (A.4)-(A.5); Appendix A.2.1", "implementation": "cutcell.research.forecast.crps and multimodal_score", "status": "score conventions and within-modality normalization; no neural training pipeline", "validation": "test_research_forecast.ForecastScores.test_sorted_crps_against_independent_pairwise_definition"},
-    {"source": "weathernext3", "locator": "Appendix A.1.2, Global mean loss; Appendix A.2.2", "implementation": "cutcell.research.forecast.field_score", "status": "global weighted mean pooling only; no spherical sliding/max pooling", "validation": "test_research_forecast.ForecastScores.test_marginals_do_not_identify_joint_distribution"},
-    {"source": "weathernext3", "locator": "Appendix A.1.1, equation (A.2)", "implementation": "cutcell.research.forecast.ConservativeFluxEnsemble", "status": "original conservative linear functional-noise adaptation; not FGN reproduction", "validation": "test_research_forecast.ConservativeSamples.test_memberwise_mass_and_pushforward_coarse_mass"}
+    {"source":"korn_2026","locator":"Section 2.1-2.2, equations (9)-(14)","implementation":"cutcell.research.ocean_diagnostics.thin_fluid_calibration and cutcell.research.transport.pseudo_density","status":"exact scalar calibration alpha=rho0*g*H, acoustic speed/Froude number, and pseudo-density map; no full momentum system","validation":"test_research_ocean_diagnostics.ThinFluidCalibrationTests"},
+    {"source":"korn_2026","locator":"Section 2.2, equations (16)-(21); Section 6.2, (99)-(100)","implementation":"cutcell.research.pressure.ColumnPressureSplit","status":"stationary separable 2-D finite-volume specialization","validation":"test_research_pressure.PressureTests.test_column_and_aggregated_pressure_against_independent_dense_solve"},
+    {"source":"korn_2026","locator":"Section 6.2.2, equations (107a)-(107c)","implementation":"cutcell.research.pressure.ColumnPressureSplit.acoustic_stage","status":"linear constant-coefficient explicit S3-b stage, not complete AC/DC","validation":"test_research_pressure.PressureTests.test_acoustic_wave_time_convergence_and_vertical_cfl"},
+    {"source":"korn_2026","locator":"Section 5.2.2, equations (78)-(79), hypotheses H1-H4","implementation":"cutcell.research.transport.consistent_tracer_step","status":"stationary closed 1-D upwind forward-Euler specialization with supplied pseudo-mass flux","validation":"test_research_transport.TransportTests.test_pseudo_mass_content_constants_and_bounds"},
+    {"source":"korn_2026","locator":"Section 3.1, equations (38)-(43)","implementation":"cutcell.research.ocean_diagnostics.flux_corrected_reconstruction and tracer_variance_diagnostics","status":"face-local physical chi and reconstruction sink D_num, including centered/upwind/limited formulas; numerical mixing is explicit, not inferred from a residual","validation":"test_research_ocean_diagnostics.TracerVarianceTests"},
+    {"source":"korn_2026","locator":"Section 3.1, equation (45)","implementation":"cutcell.research.ocean_diagnostics.osborn_cox_diffusivity","status":"Osborn-Cox diagnostic under caller-supplied statistical-steady, negligible-transport and uniform-gradient assumptions","validation":"test_research_ocean_diagnostics.TracerVarianceTests.test_osborn_cox_excludes_the_numerical_sink"},
+    {"source":"korn_2026","locator":"Section 3.2, equations (46)-(48)","implementation":"cutcell.research.ocean_diagnostics.energy_dissipation_diagnostics and mixing_diagnostics inputs","status":"physical rotational viscous dissipation and AC compressibility dissipation are diagnosed separately; advection mismatch and time-integration residual remain explicit caller inputs","validation":"test_research_ocean_energy.EnergyDissipationTests"},
+    {"source":"korn_2026","locator":"Section 3.3, equations (54)-(56)","implementation":"cutcell.research.ocean_diagnostics.mixing_diagnostics","status":"q, Gamma, flux Richardson number and K_rho from supplied separated physical/numerical terms","validation":"test_research_ocean_diagnostics.MixingDiagnosticsTests"},
+    {"source":"korn_2026","locator":"Section 5.3, equations (82)-(89)","implementation":"cutcell.research.pressure.dispersion","status":"exact stable quadratic roots, separate asymptotic errors","validation":"test_research_pressure.PressureTests.test_dispersion_matches_full_fourier_system"},
+    {"source":"weathernext3","locator":"Section 2.1, equations (1)-(3)","implementation":"cutcell.research.weathernext.SecondOrderWeatherKernel","status":"finite-state exact analogue of second-order six-hour-window trajectory factorization; weather windows are abstract states","validation":"test_research_weathernext_structure.SecondOrderTrajectoryTests"},
+    {"source":"weathernext3","locator":"Section 2.2 and Appendix A.1.1, equations (A.1)-(A.3)","implementation":"cutcell.research.weathernext.MultimodalLatentDiagram","status":"finite categorical shape of separate native-resolution encoders/decoders around one shared processor object; no neural GNN/transformer/CNN/MLP weights","validation":"test_research_weathernext_structure.MultimodalProcessorTests"},
+    {"source":"weathernext3","locator":"Section 2.1 and Appendix A.1.1 stochastic functional-generation description","implementation":"cutcell.research.weathernext.FunctionalGeneratorKernel and cutcell.category.stochastic.FiniteKernel","status":"finite shared-noise function-valued semantics: one noise draw selects one complete target field; not the learned FGN conditional-normalization mechanism","validation":"test_research_weathernext_structure.FunctionalGeneratorTests"},
+    {"source":"weathernext3","locator":"Appendix A.1.1, equations (A.4)-(A.5); Appendix A.2.1","implementation":"cutcell.research.forecast.crps and multimodal_score","status":"fair-training and empirical-evaluation CRPS conventions with within-modality normalization; no training pipeline","validation":"test_research_forecast.ForecastScores.test_sorted_crps_against_independent_pairwise_definition"},
+    {"source":"weathernext3","locator":"Appendix A.1.2 Global mean loss","implementation":"cutcell.research.forecast.field_score","status":"optional global weighted-mean pooled term, explicitly not applied automatically to station targets","validation":"test_research_forecast.ForecastScores.test_marginals_do_not_identify_joint_distribution"},
+    {"source":"weathernext3","locator":"Appendix A.2.2 Pooled CRPS","implementation":"cutcell.research.forecast.pooled_crps","status":"average/max pooling with caller-supplied patch neighborhoods and latitude-like weights; exact WN3 spherical patch construction is not invented by the library","validation":"test_research_weathernext_metrics.PooledCRPSTests"}
   ],
-  "original_constructions": [
-    "FiniteKernel stochastic composition and strong lumpability",
-    "Boundary-zero low-rank flux perturbations around the existing scalar diffusion solver",
-    "Categorical organization of deterministic pushforward and ensemble coarsening"
+  "categorical_synthesis": [
+    "Deterministic conservative ocean updates embed as deterministic morphisms inside the finite Markov category; probabilistic forecasts are stochastic kernels.",
+    "WeatherNext 3 equation (3) becomes first-order only after lifting X to the pair-state X x X. The repository now represents this explicitly rather than silently treating WN3 as first-order.",
+    "Native-resolution modality maps factor through a shared latent processor object, but that alone does not imply invertibility or exact cross-resolution naturality; both round-trip and naturality defects are explicit diagnostics.",
+    "A shared finite noise object induces one coherent field-valued stochastic map. This preserves the distinction between a distribution over functions/fields and independent pointwise perturbations.",
+    "A deterministic coarse map Q supports autonomous coarse stochastic dynamics only under strong lumpability KQ=QKc; this is independent of mass conservation.",
+    "Korn's pseudo-density continuity supplies the conservative carrier while equations (39), (46), and (47) separate physical tracer/energy dissipation from numerical or AC-induced removal. These are physical observables, not forecast calibration scores.",
+    "Pooled CRPS is a statistic after spatial pooling and therefore probes joint/spatial structure that marginal CRPS does not determine; its diagram is distinct from conservation/coarse-graining diagrams."
   ],
   "not_implemented": [
-    "Global spherical ocean dynamics, nonlinear momentum, free-surface evolution or moving vertical coordinates",
-    "AC/DC option S3-a and its horizontal-only subcycling advantage",
-    "A complete coupled pseudo-density, velocity, pressure and tracer AC/DC solver",
-    "Trained WeatherNext neural architecture, weights, satellite/station ingestion or forecast skill reproduction"
+    "Global spherical ocean dynamics, nonlinear momentum, Coriolis/buoyancy coupling, free-surface evolution, moving vertical coordinates, and the full mimetic C-grid operator set",
+    "AC/DC option S3-a, complete GCM time stepping, or an end-to-end pseudo-density/velocity/pressure/tracer ocean core",
+    "Korn's Section 7-8 telescoping-mesh numerical experiments and reported runtime ratios",
+    "Trained WeatherNext 3 GNN/transformer/CNN/MLP architecture, weights, conditional-normalization noise injection, epistemic dropout, raw satellite/station ingestion, training curriculum, operational latency, or forecast-skill reproduction",
+    "WeatherNext 3's continuous neural station query head as a continuous coordinate-conditioned neural function; the finite decoder only captures its compositional role",
+    "Automatic construction of WeatherNext's approximately equi-area latitude-longitude pooling windows; callers must supply pools and latitude weights explicitly"
   ]
 }
