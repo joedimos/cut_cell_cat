@@ -4,12 +4,13 @@ A one-dimensional, conservative finite-volume scalar diffusion research framewor
 with explicit cut-cell geometry, auditable mass budgets, diagnostic pattern search,
 optional Lean certificates for **concrete budget snapshots**, and an executable
 category-theory layer connecting cell partitions, patch fields, interface
-gluing, and conservative dynamics.
+gluing, conservative dynamics, and finite stochastic kernels.
 
 The numerical architecture is referenced to **CliMA/Oceananigans.jl at
 `819a245b837041d01fcf273d74a8b45db81ea14a`**. Read the
 [source-by-source comparison](docs/OCEANANIGANS_REFERENCE.md),
-[mathematical contract](docs/NUMERICS.md), and [migration notes](docs/MIGRATION.md), and [production validation contract](docs/PRODUCTION_READINESS.md).
+[mathematical contract](docs/NUMERICS.md), [migration notes](docs/MIGRATION.md),
+and [production validation contract](docs/PRODUCTION_READINESS.md).
 This is an independent Python implementation of a limited scalar-diffusion scope.
 It is not an Oceananigans port, a 3-D ocean model, or a formally verified solver.
 
@@ -31,6 +32,19 @@ cut-cell-category --output category-report.json
 The report includes checked identities and a counterexample to diffusion
 naturality. See the guide for derivations, evidence, complexity limits, and an
 extension map for advanced topics that are not yet implemented.
+
+### Finite Markov-category structure
+
+Version 0.6 extends the stochastic kernel layer into an explicit
+[finite Markov-category model](docs/MARKOV_CATEGORY.md): states `I -> X`,
+copy/discard maps, tensor symmetry and associators, deterministic-kernel tests,
+Bayesian inversion with explicit null-event policy, likelihood conditioning,
+and exact strong-lumpability quotients. The tests check when stochastic diagrams
+really commute rather than assuming that probabilistic coarse graining is valid.
+
+This is a finite, auditable categorical abstraction. It does not claim that
+WeatherNext itself is a Markov-category implementation or that an arbitrary
+ocean discretization is strongly lumpable.
 
 ## Ocean and WeatherNext mathematical references
 
@@ -97,7 +111,7 @@ also supported, but do not by themselves reconstruct a physical multidimensional
 
 | Layer | Responsibility |
 |---|---|
-| `cutcell/category/` | Exact finite categories, universal constructions, order adjunctions, patch sheaves, and executable tour |
+| `cutcell/category/` | Exact finite categories, universal constructions, order adjunctions, patch sheaves, cospans, finite Markov kernels, and executable tour |
 | `cutcell/categorical_numerics.py` | Incidence, dual-graph homology, coarse chain maps, weighted adjoints, and dynamics defects |
 | `cutcell/grid.py` | Cell centers, volumes, face apertures, partial-bottom geometry |
 | `cutcell/operators.py` | Shared diffusive face fluxes, boundary conditions, stability bound |
@@ -160,4 +174,7 @@ Version 0.3.0 adds these controls. Successful CI validates the documented 1-D
 scope and reference cases; it is not certification for unimplemented physics.
 
 Version 0.4.0 adds the mathematical category layer and its connected showcase.
-The diffusion solver and result schema remain compatible with version 0.3.0.
+Version 0.5.0 adds source-traceable Korn/WeatherNext research mathematics.
+Version 0.6.0 adds the finite Markov-category, Bayesian inversion, and exact
+strong-lumpability layer. The diffusion solver and result schema remain compatible
+with version 0.3.0.
