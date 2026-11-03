@@ -234,7 +234,7 @@ geometric meshes or a well-posed open PDE solver.
 | Incidence, chain maps, flux gluing, GCL, overlap margins and relation composition | Proofs above and exact regressions | Established constructions and laws |
 | State/face/source defect factorization and open-component lift | Proofs above, exhaustive small graph tests and finite Lean cases | Established algebra applied to the wet/dry interface problem |
 | Closed-mask repair obstruction, trace aliasing and path-dependent overlap remap | Explicit counterexamples and exact regressions | Verified examples. Priority in the literature is undetermined |
-| Common-atom transport witnesses across heterogeneous native solvers and restarts | Proposed instrumented experiment | Research hypothesis. Compare with flux registers, ALE/GCL checks and existing model diagnostics |
+| Common-atom transport witnesses | [Native #1048 tile seam audit](MITGCM_WETDRY_FACE_AUDIT.md) detects controlled faults missed by global and time-aggregated checks | Demonstrated for Cartesian continuity seams. Heterogeneous solvers and restart coverage remain research questions |
 | Native #1048 comparison | [Reproduction and results](MITGCM_CATEGORICAL_BENCHMARK.md) | Scoped closed-shelf experiment |
 
 The Lean file formalizes the factorization after projection to the coarse

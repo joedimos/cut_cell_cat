@@ -54,7 +54,9 @@ They do not expose the accepted face transports on both sides of each
 interface atom. The exact gluing and repair tests therefore exercise
 manufactured traces, separately from the native snapshot experiment.
 This serial barotropic benchmark provides no evidence about tracer
-uniformity, 3-D dynamics, MPI seams, restart, or field accuracy of #1048.
+uniformity, 3-D dynamics, restart, or field accuracy of #1048. The
+[companion native seam audit](MITGCM_WETDRY_FACE_AUDIT.md) separately
+checks accepted continuity transports on one process and two MPI ranks.
 
 ## Reproduce
 
