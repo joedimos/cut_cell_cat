@@ -100,6 +100,31 @@ class PlanarBedCutCell:
             return 0.0
         return max(0.0, float(area * (level - self.bed[:2] @ centroid - self.bed[2])))
 
+    def hydrostatic_potential(self, level, *, gravity=9.81):
+        """Exact gravitational potential relative to fixed z=0.
+
+        U = g/2 * integral_wet (level**2 - bed(x,y)**2) dA;
+        dU/dV = g*level on any positive-area wet interval.
+        This potential need not be positive if the datum is below zero.
+        """
+        level = _finite_scalar(level, "level")
+        gravity = _finite_scalar(gravity, "gravity")
+        if gravity <= 0.0:
+            raise ValueError("gravity must be positive")
+        polygon = self._wet_polygon(level)
+        if len(polygon) < 3:
+            return 0.0
+        origin = polygon[0]
+        total = 0.0
+        for j in range(1, len(polygon) - 1):
+            triangle = np.vstack((origin, polygon[j], polygon[j + 1]))
+            area = 0.5 * float(np.linalg.det(np.stack(
+                (triangle[1] - triangle[0], triangle[2] - triangle[0]), axis=1)))
+            z = triangle @ self.bed[:2] + self.bed[2]
+            sum_squares = float(np.dot(z, z) + z[0]*z[1] + z[1]*z[2] + z[2]*z[0])
+            total += area * (level*level - sum_squares / 6.0)
+        return 0.5 * gravity * total
+
     def layer_volumes(self, surface, interfaces):
         """Exact volumes within fixed z-interfaces; order bottom to top."""
         surface = _finite_scalar(surface, "surface")
@@ -182,6 +207,23 @@ class NonlinearCapacityPressure:
     def _area(self, surface):
         return np.array([c.wetted_area(v) for c, v in zip(self.cells, surface)])
 
+    def energy(self, surface, face_flux):
+        """Hydrostatic plus flux-quadratic energy for positive K faces.
+
+        For frozen positive conductances, the implicit step dissipates
+        this energy by convexity of potential as a function of volume.
+        """
+        surface = np.asarray(surface, dtype=float)
+        flux = np.asarray(face_flux, dtype=float)
+        if (surface.shape != (len(self.cells),) or flux.shape != (len(self.k),)
+                or not np.all(np.isfinite(surface)) or not np.all(np.isfinite(flux))
+                or np.any((self.k == 0.0) & (flux != 0.0))):
+            raise ValueError("invalid energy state or closed-face flux")
+        kinetic = 0.5 * float(np.sum(np.divide(
+            flux*flux, self.k, out=np.zeros_like(flux), where=self.k > 0.0)))
+        return sum(c.hydrostatic_potential(z, gravity=self.g)
+                   for c, z in zip(self.cells, surface)) + kinetic
+
     def step(self, old_surface, old_face_flux, dt, *, tol=1e-11, max_iter=50):
         old_surface = np.asarray(old_surface, dtype=float)
         old_face_flux = np.asarray(old_face_flux, dtype=float)
@@ -191,6 +233,8 @@ class NonlinearCapacityPressure:
                 or not np.all(np.isfinite(old_surface))
                 or not np.all(np.isfinite(old_face_flux))):
             raise ValueError("invalid old state, flux or timestep")
+        if np.any((self.k == 0.0) & (old_face_flux != 0.0)):
+            raise ValueError("closed face cannot carry an old flux")
         before = self._volume(old_surface)
         rhs = before + dt * (self.incidence @ old_face_flux)
         factor = self.g * dt * dt
