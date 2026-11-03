@@ -24,14 +24,19 @@ def run_logged(command, directory, log):
         raise RuntimeError(f'{command[0]} failed. See {directory / log}')
 
 
-def build_model(upstream, build, mods, jobs):
+def build_model(upstream, build, mods, jobs, *, mpi=False):
     build.mkdir()
     optfile = upstream / 'tools' / 'build_options' / 'linux_amd64_gfortran'
-    run_logged([str(upstream / 'tools' / 'genmake2'), '-rootdir', str(upstream),
-                '-mods', str(mods), '-of', str(optfile), '-ieee'], build, 'genmake.log')
+    command = [str(upstream / 'tools' / 'genmake2'), '-rootdir', str(upstream),
+               '-mods', str(mods), '-of', str(optfile), '-ieee']
+    if mpi:
+        command.append('-mpi')
+    run_logged(command, build, 'genmake.log')
     run_logged(['make', 'depend'], build, 'depend.log')
     run_logged(['make', '-j', str(jobs)], build, 'make.log')
-    return build / 'mitgcmuv'
+    executable = build / 'mitgcmuv'
+    executable.chmod(executable.stat().st_mode | 0o100)
+    return executable
 
 
 def run_basin(executable, directory, *, rest):

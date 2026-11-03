@@ -16,16 +16,26 @@ OVERLAY = Path(__file__).resolve().parent / 'mitgcm_cutcell'
 GRAVITY = 9.81
 
 
-def prepare_overlay(upstream, directory, nx, ny):
+def prepare_overlay(upstream, directory, nx, ny, *, levels=1, ranks=(1, 1)):
     shutil.copytree(OVERLAY, directory)
-    size = (CASE / 'SIZE.h').read_text().replace('sNx=8, sNy=7', f'sNx={nx}, sNy={ny}')
+    px, py = ranks
+    if nx % px or ny % py or min(nx // px, ny // py) < 2:
+        raise ValueError('the MPI process grid must divide the domain with two cells per tile axis')
+    size = (CASE / 'SIZE.h').read_text().replace('sNx=8, sNy=7', f'sNx={nx // px}, sNy={ny // py}')
+    size = size.replace('nPx=1, nPy=1, Nr=1', f'nPx={px}, nPy={py}, Nr={levels}')
     (directory / 'SIZE.h').write_text(size)
     shutil.copyfile(CASE / 'packages.conf', directory / 'packages.conf')
+    if levels > 1:
+        cpp = (upstream / 'model/inc/CPP_OPTIONS.h').read_text()
+        if cpp.count('#undef NONLIN_FRSURF') != 1:
+            raise ValueError('unexpected MITgcm nonlinear free-surface option')
+        (directory / 'CPP_OPTIONS.h').write_text(cpp.replace('#undef NONLIN_FRSURF', '#define NONLIN_FRSURF'))
     hooks = {
         'initialise_fixed.F': ('      CALL INI_MASKS_ETC( myThid )',
                                '      CALL INI_MASKS_ETC( myThid )\n      CALL CC_SETUP( myThid )'),
         'main_do_loop.F': ('        CALL FORWARD_STEP( iloop, myTime, myIter, myThid )',
                            '        CALL CC_FORWARD_STEP( iloop, myTime, myIter, myThid )'),
+        'initialise_varia.F': ('      CALL INI_FIELDS( myThid )', '      CALL CC_INI_FIELDS( myThid )'),
     }
     for filename, (original, replacement) in hooks.items():
         source = (upstream / 'model' / 'src' / filename).read_text()
@@ -34,11 +44,11 @@ def prepare_overlay(upstream, directory, nx, ny):
         (directory / filename).write_text(source.replace(original, replacement))
 
 
-def compile_case(upstream, directory, nx, ny, jobs):
+def compile_case(upstream, directory, nx, ny, jobs, *, levels=1, ranks=(1, 1)):
     directory.mkdir()
     mods = directory / 'code'
-    prepare_overlay(upstream, mods, nx, ny)
-    return build_model(upstream, directory / 'build', mods, jobs)
+    prepare_overlay(upstream, mods, nx, ny, levels=levels, ranks=ranks)
+    return build_model(upstream, directory / 'build', mods, jobs, mpi=ranks != (1, 1))
 
 
 def write_binary(path, *arrays):

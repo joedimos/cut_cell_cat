@@ -64,23 +64,24 @@ The command builds MITgcm via `genmake2` and runs five 15-second steps in an unf
 
 ## Native Fortran option
 
-The validation overlay builds against the pinned `checkpoint69s` source via `genmake2 -mods`. It injects an initialization hook after `INI_MASKS_ETC` and a dispatch hook around `FORWARD_STEP`. In the absence of `data.cutcell` it follows the normal MITgcm step. An enabled case selects one of two serial, one-tile, one-level modes on a closed Cartesian domain.
+The validation overlay builds against the pinned `checkpoint69s` source via `genmake2 -mods`. It injects a geometry hook after `INI_MASKS_ETC`, an initialization hook around `INI_FIELDS`, and a dispatch hook around `FORWARD_STEP`. In the absence of `data.cutcell` it follows the normal MITgcm step. An enabled case selects one of three modes on a closed Cartesian domain. Each MPI process owns one tile and uses one thread.
 
 | Mode | Native integration | Advected quantities |
 | --- | --- | --- |
 | `ccMode=1` | Replace wet `rA` and open `dyG`/`dxG` and their reciprocals before `INI_CG2D`. Stock `CG2D`, pressure-gradient correction, and `exactConserv` use the effective geometry. `DXC`, `DYC` and the vertical `hFac` fields retain their original values. | The overlay advects passive tracer with the final native `U`/`V` volume transport. The donor bound is enforced before updating tracer. |
-| `ccMode=2` | Advance a nonlinear, depth-averaged finite-volume state inside MITgcm's native timestep loop and write named MDS diagnostics. This mode has its own pressure flux and momentum update. | Water volume, horizontal discharge and passive tracer content. Dry cells can receive water. |
+| `ccMode=2` | Advance a nonlinear, depth-averaged finite-volume state inside MITgcm's native timestep loop. This mode has its own pressure flux and momentum update. | Water volume, horizontal discharge and passive tracer content. Dry cells can receive water. |
+| `ccMode=3` | Feed effective horizontal areas and widths into the stock multilayer hydrostatic `FORWARD_STEP`, with `select_rStar=2` and `nonlinFreeSurf=4`. Stock `UPDATE_R_STAR` and `UPDATE_CG2D` update the layer thickness and pressure coefficients. | Stock layer temperature and salinity. The wet mask stays fixed while layer thickness changes. |
 
-The call paths are explicit in `cc_driver.F`. Mode 1 applies geometry in `CC_SETUP`, enters the stock `FORWARD_STEP`, and calls `CC_TRANSFER` with the resulting `U` and `V`. Mode 2 dispatches from `CC_FORWARD_STEP` to `CC_SWE_ADVANCE`, which calls `CC_TRANSFER` once per explicit CFL substep. [Driver](../validation/mitgcm_cutcell/cc_driver.F) · [Nonlinear step and shared transfer](../validation/mitgcm_cutcell/cc_shallow_water.F)
+The call paths are explicit in `cc_driver.F`. Mode 1 applies geometry in `CC_SETUP`, enters the stock `FORWARD_STEP`, and calls `CC_TRANSFER` with the resulting `U` and `V`. Mode 2 dispatches from `CC_FORWARD_STEP` to `CC_SWE_ADVANCE`, which calls `CC_TRANSFER` once per explicit CFL substep. Mode 3 returns to the stock `FORWARD_STEP` after applying the geometry. [Driver](../validation/mitgcm_cutcell/cc_driver.F) · [Nonlinear step and shared transfer](../validation/mitgcm_cutcell/cc_shallow_water.F)
 
-Supply `&CUTCELL_PARM ccMode=1, /` or `ccMode=2` in `data.cutcell`. The verifier generates both cases and the binary inputs. To prepare custom cases, write IEEE big-endian binary64 arrays in the following order with x varying fastest and no record markers.
+Select the mode with `&CUTCELL_PARM ccMode=1, /` (or `2` or `3`) in `data.cutcell`. The verifier generates both cases and the binary inputs. To prepare custom cases, write IEEE big-endian binary64 arrays in the following order with x varying fastest and no record markers.
 
 | File | Consecutive fields |
 | --- | --- |
 | `cut_geometry.bin` | Planform area fraction `(nx, ny)`, west/east face apertures `(nx+1, ny)`, south/north face apertures `(nx, ny+1)` |
 | `cut_initial.bin` | Bed elevation, water depth, x and y velocities, and passive tracer concentration, each `(nx, ny)` |
 
-Mode 1 takes initial depth from native `Eta` and bathymetry and requires the cut cells and open faces to agree with the fixed native masks. Its perimeter is dry. Mode 2 takes its state from `cut_initial.bin`, closes the box boundaries, and allows at most one straight immersed wall segment per cell. Geometry is fixed in planform while water depth and reconstructed wetted face cross-section evolve. The output fields are `CCDepth` and `CCTracer` in both modes and `CCQx` and `CCQy` for nonlinear discharge. These fields describe the overlay state. For mode 1, standard `Eta`, `U`, and `V` are the native implicit solution.
+Mode 1 takes initial depth from native `Eta` and bathymetry and requires the cut cells and open faces to agree with the fixed native masks. Its perimeter is dry. Mode 2 takes its state from `cut_initial.bin`, closes the box boundaries, and allows at most one straight immersed wall segment per cell. Geometry is fixed in planform while water depth and reconstructed wetted face cross-section evolve. The output fields are `CCDepth` and `CCTracer` in both modes and `CCQx` and `CCQy` for nonlinear discharge. These fields describe the overlay state. For mode 1, standard `Eta`, `U`, and `V` are the native implicit solution. Mode 3 takes standard MITgcm `data` and initialization files and writes standard `Eta`, `U`, `V`, `W`, `T`, and `S`. It uses `cut_geometry.bin` as its only overlay input.
 
 ### Nonlinear conservation, wetting and drying
 
@@ -90,7 +91,7 @@ For each face with Rusanov wave bound $a_f$, an outgoing mass flux is bounded by
 
 ### Audit a cell from native outputs
 
-Set `ccWriteFluxes=.TRUE.` in `data.cutcell` to emit four extra MDS fields at the end of each clock step. The verifier enables this setting. Each field records the **signed amount transferred over the interval**, in m³ for water and m³ times concentration for tracer. For mode 2 the field sums the CFL substeps. The donor-volume check still runs on each individual substep.
+For modes 1 and 2, set `ccWriteFluxes=.TRUE.` in `data.cutcell` to emit four extra MDS fields at the end of each clock step. The verifier enables this setting. Each field records the **signed amount transferred over the interval**, in m³ for water and m³ times concentration for tracer. For mode 2 the field sums the CFL substeps. The donor-volume check still runs on each individual substep.
 
 | MDS field | Face and sign |
 | --- | --- |
@@ -133,4 +134,30 @@ The verifier builds an unforced linear cut basin with a fixed wet mask and check
 
 The table reports area-weighted mean absolute errors at 1.2 s. Observed depth orders were 0.47 and 0.57. The exact cross-channel discharge is zero. Nonzero computed cross-channel discharge measures numerical error inside the channel. Closed-wall flux is checked separately.
 
-The code builds as an experiment-local overlay. Both modes require one process, one tile, one level, and a closed Cartesian grid. Mode 2 stores its prognostic state in `ccState` and writes `CCDepth`, `CCQx`, `CCQy`, and `CCTracer`. Pickup/restart support would need to serialize that state and restore the geometry and clock before stepping. Coupling moving shorelines to the stock multilayer solver would require wet-mask and aperture updates shared by `UPDATE_CG2D`, the velocity correction, `INTEGR_CONTINUITY`, and tracer advection. The current evidence covers analytic benchmarks on this serial configuration. [MITgcm nonlinear free-surface formulation](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html)
+### Multilayer MPI and restart
+
+The stock multilayer case uses three layers with nominal thicknesses 4, 5, and 7 m, partial bottom layers, an oblique horizontal cut, and an active linear equation of state. The overlay changes `rA`, `dyG`, and `dxG` and their reciprocals before `INI_CG2D`. Native `hFacC/W/S` still represent vertical fractions. `rStar` evolves the native layer and face thicknesses over the fixed wet mask. The native momentum correction, `exactConserv` continuity, and temperature and salinity transport run in the stock model. For the budget audit, each native layer volume is the effective cell area times the reference layer thickness times the `rStar` factor $(H+\eta)/H$. Mode 3 requires implicit surface pressure and divergence, staggered time stepping, and the Boussinesq hydrostatic Cartesian configuration. This experiment disables momentum advection, viscosity, forcing, and rotation.
+
+For moving shorelines, each rank advances its own cells and exchanges depth, velocity, bed, and donor concentration with MITgcm's halo routines. The CFL step is the minimum across the ranks. At an MPI seam, both tiles evaluate the same oriented flux from the same two exchanged states. Each applies the transfer to its own cell, and the east or north tile writes the shared face record. Global geometry and checkpoint files require a shared run directory.
+
+| Mode | Resume at iteration `N` |
+| --- | --- |
+| 1, stock single-layer pressure plus overlay tracer | Set `nIter0=N` and copy the native `pickup.N` data and metadata together with `cut_pickup.N.bin`. Use `pChkptFreq` and `ccPickupEvery` to schedule both files for the same iteration. |
+| 2, depth-averaged wetting and drying | Set `nIter0=N` and copy `cut_pickup.N.bin` and the original geometry and standard MITgcm inputs. The checkpoint supplies the bed, volume, discharge and tracer content. The original `cut_initial.bin` is needed only for a cold start. |
+| 3, stock multilayer `rStar` | Set `nIter0=N` and copy the native `pickup.N` data and metadata. Reuse the same bathymetry, cut geometry, grid metrics and timestep. |
+
+Pickup iteration suffixes are ten digits, such as `0000000003`. In modes 1 and 2, set `ccPickupEvery` to a positive iteration interval to write numbered overlay pickups. The run also writes one at its final iteration. Rank zero gathers and writes the global checkpoint to a temporary stream and renames it after closing. The reader checks version, dimensions, mode, iteration, model time, timestep, gravity, and effective geometry. The format stores global arrays, so resuming can use a different MPI process grid. The stock native pickup handles the native state and timestep history in modes 1 and 3.
+
+```sh
+python validation/verify_mitgcm_parallel.py ../MITgcm validation/results/mitgcm_parallel --jobs 4
+```
+
+The parallel verifier requires GNU Fortran and MPI compiler wrappers and launcher. It compiles serial and 2×2 process-grid executables, runs uninterrupted and iteration-3 restart cases, and compares the MDS state at every common step. It also checks native volume, temperature and salinity content using the cut cell areas and `rStar` layer volumes, verifies transport across MPI seams, and rejects a mode-2 checkpoint when the geometry changes.
+
+| Case | Serial vs. four ranks | Four-rank checkpoint resumed on one rank |
+| --- | --- | --- |
+| Stock three-layer `rStar`, 14 horizontal cut cells and 39 partial bottom cells | Maximum surface difference $1.35\times10^{-15}$ m. Relative volume drift $2.12\times10^{-16}$, zero measured temperature and salinity content drift. | Maximum surface difference $9.23\times10^{-16}$ m. Temperature and salinity snapshots matched exactly. |
+| Stock single-layer pressure with overlay tracer | Maximum surface difference $1.18\times10^{-16}$ m and tracer concentration difference $1.11\times10^{-16}$. | Maximum surface difference $6.25\times10^{-17}$ m and tracer concentration difference $5.55\times10^{-17}$. |
+| Nonlinear wetting and drying | State and face-transfer snapshots matched bit for bit. Sum of the absolute recorded seam transfers was 3.94 m³. | State and face transfers matched bit for bit. A changed cell fraction caused the pickup to be rejected. |
+
+Stock multilayer coupling supports fixed horizontal cut geometry with moving `rStar` layers. Activation or deactivation of whole columns uses the depth-averaged shoreline solver in mode 2. A moving wet mask inside the stock multilayer `CG2D` solver, curved walls, and upstream packaging are outside the implemented configuration. [MITgcm nonlinear free-surface formulation](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html)

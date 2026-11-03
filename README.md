@@ -51,7 +51,7 @@ Important distinctions are enforced by tests:
 
 ## MITgcm and horizontal cut cells
 
-The bridge reads native MITgcm MDS geometry, replays the fully implicit linear barotropic stage, and checks the 2-D conservative coarse-grid chain map. A native Fortran overlay adds horizontal cut cells to the stock implicit stage and a one-layer nonlinear mode for wetting and drying. Both modes advect a passive tracer with the same volume transfers as continuity. The nonlinear tests include a sloped-bed lake at rest and a dry-bed dam break in an oblique channel against the Ritter solution. See the [MITgcm verification cases and derivation](docs/MITGCM_CUT_CELLS.md) for scope and reproduction commands.
+The bridge reads native MITgcm MDS geometry, replays the fully implicit linear barotropic stage, and checks the 2-D conservative coarse-grid chain map. The native Fortran overlay supports stock multilayer rStar pressure and tracer transport on fixed cut geometry, and a depth-averaged mode for moving shorelines. The verification suite checks MPI seams and checkpoints that restart on a different process grid. The nonlinear tests include a sloped-bed lake at rest and a dry-bed dam break in an oblique channel against the Ritter solution. See the [MITgcm verification cases and derivation](docs/MITGCM_CUT_CELLS.md) for scope and reproduction commands.
 
 ## WeatherNext 3 structure
 

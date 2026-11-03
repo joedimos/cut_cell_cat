@@ -9,10 +9,10 @@
 #include "GRID.h"
 #include "EOS.h"
 #include "CUT_CELL.h"
-      INTEGER myThid,unit,ios,nbytes,i,j,edge
+      INTEGER myThid,unit,ios,nbytes,i,j,edge,i0,j0
       LOGICAL enabled
-      _RL fractions(sNx,sNy)
-      NAMELIST /CUTCELL_PARM/ ccMode,ccWriteFluxes
+      _RL fractions(Nx,Ny),globalW(Nx+1,Ny),globalS(Nx,Ny+1)
+      NAMELIST /CUTCELL_PARM/ ccMode,ccWriteFluxes,ccPickupEvery
 
       INQUIRE(FILE='data.cutcell',EXIST=enabled)
       IF (.NOT.enabled) THEN
@@ -20,35 +20,51 @@
        _BARRIER
        RETURN
       ENDIF
-      IF ( nThreads.NE.1 .OR. nSx*nSy*nPx*nPy.NE.1 .OR. Nr.NE.1 )
-     & STOP 'CUTCELL requires a serial, one-level, one-tile grid'
+      IF (nThreads.NE.1 .OR. nSx*nSy.NE.1)
+     & CALL CC_FAIL('one thread and tile per rank required',myThid)
       OPEN(NEWUNIT=unit,FILE='data.cutcell',STATUS='OLD',
      &     ACTION='READ',IOSTAT=ios)
-      IF (ios.NE.0) STOP 'CUTCELL cannot open data.cutcell'
+      IF (ios.NE.0) CALL CC_FAIL('cannot open data.cutcell',myThid)
       ccMode=0
       ccWriteFluxes=.FALSE.
+      ccPickupEvery=0
       READ(unit,NML=CUTCELL_PARM,IOSTAT=ios)
       CLOSE(unit)
-      IF (ios.NE.0 .OR. ccMode.LT.1 .OR. ccMode.GT.2)
-     & STOP 'CUTCELL requires ccMode=1 (linear) or 2 (shallow water)'
-      IF ( .NOT.usingCartesianGrid .OR. nonHydrostatic .OR.
-     &     .NOT.fluidIsWater .OR. nIter0.NE.0 .OR. nonlinFreeSurf.NE.0
-     &     .OR. useOBCS .OR. useRealFreshWaterFlux .OR.
-     &     momAdvection .OR. momViscosity .OR. momForcing .OR.
-     &     tempStepping .OR. saltStepping .OR. f0.NE.0. _d 0 .OR.
-     &     beta.NE.0. _d 0 ) STOP 'CUTCELL unsupported configuration'
+      IF (ios.NE.0 .OR. ccMode.LT.1 .OR. ccMode.GT.3
+     &    .OR. ccPickupEvery.LT.0)
+     & CALL CC_FAIL('invalid cut-cell mode or pickup interval',myThid)
+      IF ( .NOT.usingCartesianGrid .OR. useCubedSphereExchange .OR.
+     &     nonHydrostatic .OR.
+     &     .NOT.fluidIsWater .OR. useOBCS .OR. useRealFreshWaterFlux
+     &     .OR. momAdvection .OR. momViscosity .OR. momForcing .OR.
+     &     f0.NE.0. _d 0 .OR. beta.NE.0. _d 0 )
+     & CALL CC_FAIL('unsupported native configuration',myThid)
       IF ( .NOT.IEEE_IS_FINITE(gravity) .OR. gravity.LE.0. _d 0 .OR.
      &     .NOT.IEEE_IS_FINITE(deltaTClock) .OR.
      &     deltaTClock.LE.0. _d 0 .OR. nTimeSteps.LE.0 )
-     & STOP 'CUTCELL invalid gravity or model clock'
-      IF (ccMode.EQ.1) THEN
+     & CALL CC_FAIL('invalid gravity or model clock',myThid)
+      IF (ccMode.LE.2) THEN
+       IF (Nr.NE.1 .OR. nonlinFreeSurf.NE.0 .OR.
+     &     tempStepping .OR. saltStepping)
+     &  CALL CC_FAIL('overlay modes require one level',myThid)
+       IF (ccMode.EQ.2 .AND. pickupSuff.NE.' ')
+     &  CALL CC_FAIL('mode 2 uses nIter0 to select pickups',myThid)
+      ELSE
+       IF (Nr.LT.2 .OR. nonlinFreeSurf.NE.4 .OR. select_rStar.NE.2 .OR.
+     &     .NOT.staggerTimeStep .OR. ccWriteFluxes .OR.
+     &     ccPickupEvery.NE.0)
+     &  CALL CC_FAIL('mode 3 requires native rStar and pickups',myThid)
+      ENDIF
+      IF (ccMode.NE.2) THEN
        IF ( .NOT.exactConserv .OR. .NOT.implicitFreeSurface .OR.
      &      implicDiv2DFlow.NE.1. _d 0 .OR. implicSurfPress.NE.1. _d 0
      &      .OR. deltaTMom.NE.deltaTClock .OR.
-     &      deltaTFreeSurf.NE.deltaTClock .OR. tAlpha.NE.0. _d 0
-     &      .OR. sBeta.NE.0. _d 0 .OR. eosType.NE.'LINEAR'
-     &      .OR. deepFacC(1).NE.1. _d 0 .OR. rhoFacC(1).NE.1. _d 0 )
-     &   STOP 'CUTCELL requires Boussinesq implicit pressure'
+     &      deltaTFreeSurf.NE.deltaTClock .OR.
+     &      ANY(deepFacC.NE.1. _d 0) .OR. ANY(rhoFacC.NE.1. _d 0) )
+     &  CALL CC_FAIL('requires Boussinesq implicit pressure',myThid)
+       IF (ccMode.EQ.1 .AND. (tAlpha.NE.0. _d 0 .OR.
+     &      sBeta.NE.0. _d 0 .OR. eosType.NE.'LINEAR'))
+     &  CALL CC_FAIL('legacy mode requires a neutral EOS',myThid)
       ENDIF
 
 C     Raw IEEE binary64, in Fortran order. Lengths use unmodified MITgcm
@@ -56,48 +72,54 @@ C     grid metrics. The first/exterior face is geometrically present in
 C     mode 2 but carries zero transport. Mode 1 requires a dry perimeter.
       OPEN(NEWUNIT=unit,FILE='cut_geometry.bin',STATUS='OLD',
      &     ACTION='READ',FORM='UNFORMATTED',ACCESS='STREAM',IOSTAT=ios)
-      IF (ios.NE.0) STOP 'CUTCELL missing cut_geometry.bin'
+      IF (ios.NE.0)
+     & CALL CC_FAIL('missing cut_geometry.bin',myThid)
       INQUIRE(UNIT=unit,SIZE=nbytes)
-      IF (nbytes.NE.8*(3*sNx*sNy+sNx+sNy))
-     & STOP 'CUTCELL wrong cut_geometry.bin size'
-      READ(unit,IOSTAT=ios) fractions,ccWest,ccSouth
+      IF (nbytes.NE.8*(3*Nx*Ny+Nx+Ny))
+     & CALL CC_FAIL('wrong cut_geometry.bin size',myThid)
+      READ(unit,IOSTAT=ios) fractions,globalW,globalS
       CLOSE(unit)
-      IF (ios.NE.0) STOP 'CUTCELL could not read geometry'
+      IF (ios.NE.0)
+     & CALL CC_FAIL('could not read geometry',myThid)
       IF ( ANY(.NOT.IEEE_IS_FINITE(fractions)) .OR.
-     &     ANY(.NOT.IEEE_IS_FINITE(ccWest)) .OR.
-     &     ANY(.NOT.IEEE_IS_FINITE(ccSouth)) .OR.
+     &     ANY(.NOT.IEEE_IS_FINITE(globalW)) .OR.
+     &     ANY(.NOT.IEEE_IS_FINITE(globalS)) .OR.
      &     ANY(fractions.LT.0. _d 0) .OR. ANY(fractions.GT.1. _d 0)
-     &     .OR. ANY(ccWest.LT.0. _d 0) .OR. ANY(ccWest.GT.1. _d 0)
-     &     .OR. ANY(ccSouth.LT.0. _d 0) .OR. ANY(ccSouth.GT.1. _d 0)
+     &     .OR. ANY(globalW.LT.0. _d 0) .OR. ANY(globalW.GT.1. _d 0)
+     &     .OR. ANY(globalS.LT.0. _d 0) .OR. ANY(globalS.GT.1. _d 0)
      &     .OR. .NOT.ANY(fractions.GT.0. _d 0) )
-     & STOP 'CUTCELL invalid geometry fractions'
-      DO j=1,sNy
-       DO i=2,sNx
-        IF (ccWest(i,j).GT.0. _d 0 .AND.
+     & CALL CC_FAIL('invalid geometry fractions',myThid)
+      DO j=1,Ny
+       DO i=2,Nx
+        IF (globalW(i,j).GT.0. _d 0 .AND.
      &      MIN(fractions(i-1,j),fractions(i,j)).EQ.0. _d 0)
-     &   STOP 'CUTCELL west aperture meets a solid cell'
+     &   CALL CC_FAIL('west aperture meets a solid cell',myThid)
        ENDDO
       ENDDO
-      DO j=2,sNy
-       DO i=1,sNx
-        IF (ccSouth(i,j).GT.0. _d 0 .AND.
+      DO j=2,Ny
+       DO i=1,Nx
+        IF (globalS(i,j).GT.0. _d 0 .AND.
      &      MIN(fractions(i,j-1),fractions(i,j)).EQ.0. _d 0)
-     &   STOP 'CUTCELL south aperture meets a solid cell'
+     & CALL CC_FAIL('south aperture meets a solid cell',myThid)
        ENDDO
       ENDDO
-      IF ( ANY(ccWest(1,:).GT.0. _d 0 .AND.
+      IF ( ANY(globalW(1,:).GT.0. _d 0 .AND.
      &         fractions(1,:).EQ.0. _d 0) .OR.
-     &     ANY(ccWest(sNx+1,:).GT.0. _d 0 .AND.
-     &         fractions(sNx,:).EQ.0. _d 0) .OR.
-     &     ANY(ccSouth(:,1).GT.0. _d 0 .AND.
+     &     ANY(globalW(Nx+1,:).GT.0. _d 0 .AND.
+     &         fractions(Nx,:).EQ.0. _d 0) .OR.
+     &     ANY(globalS(:,1).GT.0. _d 0 .AND.
      &         fractions(:,1).EQ.0. _d 0) .OR.
-     &     ANY(ccSouth(:,sNy+1).GT.0. _d 0 .AND.
-     &         fractions(:,sNy).EQ.0. _d 0) )
-     & STOP 'CUTCELL exterior aperture meets a solid cell'
+     &     ANY(globalS(:,Ny+1).GT.0. _d 0 .AND.
+     &         fractions(:,Ny).EQ.0. _d 0) )
+     & CALL CC_FAIL('exterior aperture meets a solid cell',myThid)
 
+      i0=myXGlobalLo-1
+      j0=myYGlobalLo-1
+      ccWest=globalW(i0+1:i0+sNx+1,j0+1:j0+sNy)
+      ccSouth=globalS(i0+1:i0+sNx,j0+1:j0+sNy+1)
       DO j=1,sNy
        DO i=1,sNx
-        ccArea(i,j)=rA(i,j,1,1)*fractions(i,j)
+        ccArea(i,j)=rA(i,j,1,1)*fractions(i0+i,j0+j)
        ENDDO
        DO i=1,sNx+1
         edge=MIN(i,sNx)
@@ -115,22 +137,22 @@ C     mode 2 but carries zero transport. Mode 1 requires a dry perimeter.
 C     The stock implicit solver sees effective wet-cell area and open
 C     face width. DXC/DYC remain the pressure-gradient distances. A
 C     dry border suppresses the model's default periodic seam.
-      IF ( ANY(ccArea(1,:).GT.0. _d 0) .OR.
-     &     ANY(ccArea(sNx,:).GT.0. _d 0) .OR.
-     &     ANY(ccArea(:,1).GT.0. _d 0) .OR.
-     &     ANY(ccArea(:,sNy).GT.0. _d 0) )
-     & STOP 'CUTCELL linear mode requires a dry border'
+      IF ( ANY(fractions(1,:).GT.0. _d 0) .OR.
+     &     ANY(fractions(Nx,:).GT.0. _d 0) .OR.
+     &     ANY(fractions(:,1).GT.0. _d 0) .OR.
+     &     ANY(fractions(:,Ny).GT.0. _d 0) )
+     & CALL CC_FAIL('stock modes require a dry border',myThid)
       DO j=1,sNy
        DO i=1,sNx
         IF ((ccArea(i,j).GT.0. _d 0) .NEQV.
-     &      (hFacC(i,j,1,1,1).GT.0. _d 0))
-     &   STOP 'CUTCELL cell fractions and native bathymetry disagree'
+     &      ANY(hFacC(i,j,:,1,1).GT.0. _d 0))
+     & CALL CC_FAIL('cell fractions and bathymetry disagree',myThid)
         IF ((ccWest(i,j).GT.0. _d 0) .NEQV.
-     &      (hFacW(i,j,1,1,1).GT.0. _d 0))
-     &   STOP 'CUTCELL west apertures and native masks disagree'
+     &      ANY(hFacW(i,j,:,1,1).GT.0. _d 0))
+     & CALL CC_FAIL('west apertures and native masks disagree',myThid)
         IF ((ccSouth(i,j).GT.0. _d 0) .NEQV.
-     &      (hFacS(i,j,1,1,1).GT.0. _d 0))
-     &   STOP 'CUTCELL south apertures and native masks disagree'
+     &      ANY(hFacS(i,j,:,1,1).GT.0. _d 0))
+     & CALL CC_FAIL('south apertures and native masks disagree',myThid)
         IF (ccArea(i,j).GT.0. _d 0) THEN
          rA(i,j,1,1)=ccArea(i,j)
          recip_rA(i,j,1,1)=1. _d 0/ccArea(i,j)
@@ -151,6 +173,26 @@ C     dry border suppresses the model's default periodic seam.
       CALL EXCH_UV_XY_RS(recip_dyG,recip_dxG,.FALSE.,myThid)
       END
 
+      SUBROUTINE CC_FAIL(message,myThid)
+      IMPLICIT NONE
+#include "SIZE.h"
+#include "EEPARAMS.h"
+#include "EESUPPORT.h"
+      CHARACTER*(*) message
+      INTEGER myThid
+      CHARACTER*(MAX_LEN_MBUF) msgBuf
+#ifdef ALLOW_USE_MPI
+      INTEGER ierr
+#endif
+      msgBuf='CUTCELL: '//message
+      CALL PRINT_ERROR(msgBuf,myThid)
+      FLUSH(errorMessageUnit)
+#ifdef ALLOW_USE_MPI
+      IF (usingMPI) CALL MPI_ABORT(MPI_COMM_MODEL,1,ierr)
+#endif
+      STOP 1
+      END
+
       SUBROUTINE CC_FORWARD_STEP( iloop,myTime,myIter,myThid )
       IMPLICIT NONE
 #include "SIZE.h"
@@ -164,38 +206,50 @@ C     dry border suppresses the model's default periodic seam.
       _RL myTime,west(sNx+1,sNy),south(sNx,sNy+1)
       _RL ledger(4,sNx,sNy)
 
-      IF (ccMode.EQ.0) THEN
+      IF (ccMode.EQ.0 .OR. ccMode.EQ.3) THEN
        CALL FORWARD_STEP(iloop,myTime,myIter,myThid)
        RETURN
       ENDIF
       IF (iloop.EQ.1) THEN
-       CALL CC_INITIAL_STATE
+       IF (nIter0.GT.0) THEN
+        CALL CC_PICKUP(.TRUE.,nIter0,startTime,myThid)
+       ELSE
+        CALL CC_INITIAL_STATE(myThid)
+       ENDIF
        CALL CC_WRITE_STATE(nIter0,myThid)
       ENDIF
       IF (ccWriteFluxes) ledger=0. _d 0
       IF (ccMode.EQ.1) THEN
        CALL FORWARD_STEP(iloop,myTime,myIter,myThid)
-       west=0. _d 0
-       south=0. _d 0
+C      Bring the corrected velocity on the east/north seam into halo.
+       CALL EXCH_UV_3D_RL(uVel,vVel,.FALSE.,Nr,myThid)
        DO j=1,sNy
-        DO i=1,sNx
+        DO i=1,sNx+1
          west(i,j)=ccWest(i,j)*drF(1)*hFacW(i,j,1,1,1)
      &      *uVel(i,j,1,1,1)*deltaTClock
+        ENDDO
+       ENDDO
+       DO j=1,sNy+1
+        DO i=1,sNx
          south(i,j)=ccSouth(i,j)*drF(1)*hFacS(i,j,1,1,1)
      &      *vVel(i,j,1,1,1)*deltaTClock
         ENDDO
        ENDDO
-       CALL CC_TRANSFER(sNx,sNy,ccState,west,south,
-     &                  ccWriteFluxes,ledger)
+       CALL CC_TRANSFER(ccState,west,south,
+     &                  ccWriteFluxes,ledger,myThid)
       ELSE
-       CALL CC_SWE_ADVANCE(sNx,sNy,ccArea,ccWest,ccSouth,ccBed,
+       CALL CC_SWE_ADVANCE(ccArea,ccWest,ccSouth,ccBed,
      &                     gravity,deltaTClock,ccState,
-     &                     ccWriteFluxes,ledger)
+     &                     ccWriteFluxes,ledger,myThid)
        myIter=nIter0+iloop
        myTime=startTime+deltaTClock*iloop
       ENDIF
       CALL CC_WRITE_STATE(myIter,myThid)
       IF (ccWriteFluxes) CALL CC_WRITE_FLUXES(ledger,myIter,myThid)
+      IF (ccPickupEvery.GT.0) THEN
+       IF (MOD(myIter,ccPickupEvery).EQ.0 .OR. iloop.EQ.nTimeSteps)
+     &  CALL CC_PICKUP(.FALSE.,myIter,myTime,myThid)
+      ENDIF
       WRITE(standardMessageUnit,'(A,I8,1X,ES24.16)')
      & 'CUTCELL clock ',myIter,myTime
       END
@@ -219,7 +273,7 @@ C     are closed, including the unrecorded terminal east/north faces.
       ENDDO
       END
 
-      SUBROUTINE CC_INITIAL_STATE
+      SUBROUTINE CC_INITIAL_STATE(myThid)
       USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
       IMPLICIT NONE
 #include "SIZE.h"
@@ -229,22 +283,32 @@ C     are closed, including the unrecorded terminal east/north faces.
 #include "DYNVARS.h"
 #include "SURFACE.h"
 #include "CUT_CELL.h"
-      INTEGER unit,ios,nbytes,i,j
+      INTEGER myThid,unit,ios,nbytes,i,j,i0,j0
       _RL depth(sNx,sNy),ux(sNx,sNy),uy(sNx,sNy),tracer(sNx,sNy)
+      _RL initial(Nx,Ny,5)
       OPEN(NEWUNIT=unit,FILE='cut_initial.bin',STATUS='OLD',
      &     ACTION='READ',FORM='UNFORMATTED',ACCESS='STREAM',IOSTAT=ios)
-      IF (ios.NE.0) STOP 'CUTCELL missing cut_initial.bin'
+      IF (ios.NE.0) CALL CC_FAIL('missing cut_initial.bin',myThid)
       INQUIRE(UNIT=unit,SIZE=nbytes)
-      IF (nbytes.NE.8*5*sNx*sNy) STOP 'CUTCELL wrong initial file size'
-      READ(unit,IOSTAT=ios) ccBed,depth,ux,uy,tracer
+      IF (nbytes.NE.8*5*Nx*Ny)
+     & CALL CC_FAIL('wrong initial file size',myThid)
+      READ(unit,IOSTAT=ios) initial
       CLOSE(unit)
-      IF (ios.NE.0) STOP 'CUTCELL could not read initial state'
+      IF (ios.NE.0) CALL CC_FAIL('cannot read initial state',myThid)
+      i0=myXGlobalLo-1
+      j0=myYGlobalLo-1
+      ccBed=initial(i0+1:i0+sNx,j0+1:j0+sNy,1)
+      depth=initial(i0+1:i0+sNx,j0+1:j0+sNy,2)
+      ux=initial(i0+1:i0+sNx,j0+1:j0+sNy,3)
+      uy=initial(i0+1:i0+sNx,j0+1:j0+sNy,4)
+      tracer=initial(i0+1:i0+sNx,j0+1:j0+sNy,5)
       IF ( ANY(.NOT.IEEE_IS_FINITE(ccBed)) .OR.
      &     ANY(.NOT.IEEE_IS_FINITE(depth)) .OR.
      &     ANY(.NOT.IEEE_IS_FINITE(ux)) .OR.
      &     ANY(.NOT.IEEE_IS_FINITE(uy)) .OR.
      &     ANY(.NOT.IEEE_IS_FINITE(tracer)) .OR.
-     &     ANY(depth.LT.0. _d 0) ) STOP 'CUTCELL invalid initial state'
+     &     ANY(depth.LT.0. _d 0) )
+     & CALL CC_FAIL('invalid initial state',myThid)
       ccState=0. _d 0
       DO j=1,sNy
        DO i=1,sNx
@@ -264,7 +328,7 @@ C     are closed, including the unrecorded terminal east/north faces.
       ENDDO
       IF ( ANY(ccState(1,:,:).LT.0. _d 0) .OR.
      &     ANY(.NOT.IEEE_IS_FINITE(ccState)) )
-     & STOP 'CUTCELL nonrepresentable conserved state'
+     & CALL CC_FAIL('nonrepresentable conserved state',myThid)
       END
 
       SUBROUTINE CC_WRITE_STATE(myIter,myThid)
