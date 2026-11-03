@@ -55,7 +55,7 @@ def run_case(executable, directory, data, bathy, eta, *, mode=None, geometry=Non
     write_binary(directory / 'bathy.bin', bathy)
     write_binary(directory / 'eta.bin', eta)
     if mode is not None:
-        (directory / 'data.cutcell').write_text(f' &CUTCELL_PARM\n ccMode={mode},\n /\n')
+        (directory / 'data.cutcell').write_text(f' &CUTCELL_PARM\n ccMode={mode}, ccWriteFluxes=.TRUE.,\n /\n')
         write_binary(directory / 'cut_geometry.bin', *geometry)
         write_binary(directory / 'cut_initial.bin', *initial)
     run_logged([str(executable)], directory, 'run.log')
@@ -66,6 +66,40 @@ def run_case(executable, directory, data, bathy, eta, *, mode=None, geometry=Non
         observed = re.findall(r'CUTCELL clock\s+(\d+)\s+(\S+)', log)
         np.testing.assert_array_equal([int(i) for i, _ in observed], np.arange(1, len(clock) + 1))
         np.testing.assert_allclose([float(t) for _, t in observed], clock, atol=2e-14, rtol=0)
+
+
+def storage(area, depth, tracer):
+    volume = area * depth
+    return np.stack((volume, volume * tracer))
+
+
+def audit_faces(read, step, geometry, previous, current):
+    """Check the two local balances against signed native face transfers."""
+    _, west_aperture, south_aperture = geometry
+    west = np.stack((read('CCVolW', step), read('CCTrW', step)))
+    south = np.stack((read('CCVolS', step), read('CCTrS', step)))
+    np.testing.assert_array_equal(west[:, west_aperture[:, :-1] == 0.], 0.)
+    np.testing.assert_array_equal(south[:, south_aperture[:-1, :] == 0.], 0.)
+    np.testing.assert_array_equal(west[:, :, 0], 0.)
+    np.testing.assert_array_equal(south[:, 0, :], 0.)
+    east, north = np.zeros_like(west), np.zeros_like(south)
+    east[:, :, :-1] = west[:, :, 1:]
+    north[:, :-1, :] = south[:, 1:, :]
+    faces = np.stack((west, east, south, north))
+    residual = current - previous - (west - east + south - north)
+    scale = np.maximum(1., np.abs(previous) + np.abs(current) + np.abs(faces).sum(axis=0))
+    np.testing.assert_array_less(np.abs(residual), 512 * np.finfo(float).eps * scale)
+    return faces, residual
+
+
+def cell_trace(step, j, i, fraction, old, new, faces, residual):
+    return {'iteration': step, 'fortran_cell_ij': [int(i) + 1, int(j) + 1],
+            'area_fraction': float(fraction[j, i]), 'old_volume_m3': float(old[0, j, i]),
+            'new_volume_m3': float(new[0, j, i]), 'old_tracer_content': float(old[1, j, i]),
+            'new_tracer_content': float(new[1, j, i]),
+            'volume_transfers_west_east_south_north_m3': faces[:, 0, j, i].tolist(),
+            'tracer_transfers_west_east_south_north': faces[:, 1, j, i].tolist(),
+            'volume_residual_m3': float(residual[0, j, i]), 'tracer_residual': float(residual[1, j, i])}
 
 
 def verify_linear(executable, directory, rdmds):
@@ -120,10 +154,13 @@ def verify_linear(executable, directory, rdmds):
     control_eta, control_velocity = state(0, control_field, control_grid)
     volume = grid.area * (grid.depth + old_eta)
     concentration = tracer[grid.wet]
+    physical_area = control_field('RAC') * area
+    previous = storage(physical_area, cut_field('CCDepth', 0), cut_field('CCTracer', 0))
     initial_volume = volume.sum()
     initial_content = volume @ concentration
     eta_error, velocity_error, tracer_error, transport_error = 0., 0., 0., 0.
     volume_drift, content_drift = 0., 0.
+    local_budget_error = np.zeros(2)
     for step in range(1, NSTEPS + 1):
         expected_eta, expected_velocity, _, _ = grid.step(old_eta, velocity, DT)
         expected_control_eta, expected_control_velocity, _, _ = control_grid.step(control_eta, control_velocity, DT)
@@ -131,9 +168,26 @@ def verify_linear(executable, directory, rdmds):
         np.testing.assert_allclose(control_eta, expected_control_eta, rtol=0, atol=2e-11)
         np.testing.assert_allclose(control_velocity, expected_control_velocity, rtol=0, atol=2e-11)
         old_eta, velocity = state(step, cut_field, grid)
-        volume, concentration = grid.tracer_step(volume, concentration, grid.cross_section * velocity, DT)
-        native_volume = grid.area * cut_field('CCDepth', step)[grid.wet]
-        native_tracer = cut_field('CCTracer', step)[grid.wet]
+        transport = grid.cross_section * velocity
+        native_depth, native_c = cut_field('CCDepth', step), cut_field('CCTracer', step)
+        current = storage(physical_area, native_depth, native_c)
+        faces, residual = audit_faces(cut_field, step, (area, west, south), previous, current)
+        local_budget_error = np.maximum(local_budget_error, np.max(np.abs(residual), axis=(1, 2)))
+        flux, tracer_flux = (grid.pack_velocity(faces[0, k], faces[2, k]) for k in range(2))
+        donor = np.where(transport >= 0., grid.tail, grid.head)
+        np.testing.assert_allclose(flux, DT * transport, atol=2e-12, rtol=2e-15)
+        np.testing.assert_allclose(tracer_flux, flux * concentration[donor], atol=2e-12, rtol=2e-15)
+        if step == 1:
+            cut_cells = (area > 0.) & (area < 1.)
+            change = np.where(cut_cells, np.abs(current[0] - previous[0]), 0.)
+            if not np.any(change > 0.):
+                raise AssertionError('first linear step had no volume change in a cut cell')
+            j, i = np.unravel_index(np.argmax(change), area.shape)
+            trace = cell_trace(step, j, i, area, previous, current, faces, residual)
+        previous = current
+        volume, concentration = grid.tracer_step(volume, concentration, transport, DT)
+        native_volume = current[0, grid.wet]
+        native_tracer = native_c[grid.wet]
         eta_error = max(eta_error, np.max(np.abs(old_eta - expected_eta)))
         velocity_error = max(velocity_error, np.max(np.abs(velocity - expected_velocity)))
         tracer_error = max(tracer_error, np.max(np.abs(concentration - native_tracer)))
@@ -150,7 +204,9 @@ def verify_linear(executable, directory, rdmds):
             'max_native_surface_error_m': float(eta_error), 'max_native_velocity_error_m_s': float(velocity_error),
             'max_tracer_error': float(tracer_error), 'max_transport_depth_error_m': float(transport_error),
             'max_volume_drift_m3': float(volume_drift), 'max_tracer_content_drift': float(content_drift),
-            'final_native_surface_difference_from_uncut_m': float(effect)}
+            'final_native_surface_difference_from_uncut_m': float(effect),
+            'max_local_volume_budget_residual_m3': float(local_budget_error[0]),
+            'max_local_tracer_budget_residual': float(local_budget_error[1]), 'cut_cell_trace': trace}
 
 
 STRIP_EDGE = 4. / 3.
@@ -167,18 +223,21 @@ def channel(size):
     return edges, geometry, np.meshgrid(centers, centers)
 
 
-def ritter_cell_average(edges, fraction):
-    """Integrate the analytic Ritter depth over each clipped channel cell."""
+def ritter_cell_averages(edges, fraction):
+    """Integrate analytic Ritter depth and discharge over each cut polygon."""
     root2 = np.sqrt(2.)
     wave = np.sqrt(GRAVITY)
     start, end = -wave * DAM_TIME, 2 * wave * DAM_TIME
     lower, upper = -STRIP_EDGE, STRIP_EDGE
-    result = np.zeros_like(fraction)
+    result = np.zeros((2, *fraction.shape))
 
     def primitive(x, y):
         s = (x + y) / root2
         fan = np.clip(s, start, end)
-        return np.minimum(s - start, 0.) + ((end - start)**3 - (end - fan)**3) / (27 * GRAVITY * DAM_TIME**2)
+        width, distance = end - start, end - fan
+        depth = (width**3 - distance**3) / (27 * GRAVITY * DAM_TIME**2)
+        discharge = 2 * wave * depth - (width**4 - distance**4) / (54 * GRAVITY * DAM_TIME**3)
+        return np.stack((np.minimum(s - start, 0.) + depth, discharge))
 
     for j, i in zip(*np.nonzero(fraction)):
         x0, x1 = edges[i:i + 2]
@@ -189,10 +248,12 @@ def ritter_cell_average(edges, fraction):
         intervals = np.array([x0, *sorted(x for x in knots if x0 < x < x1), x1])
         half = np.diff(intervals) / 2
         mid = (intervals[:-1] + intervals[1:]) / 2
-        nodes = mid[:, None] + half[:, None] * np.array([-1., 1.]) / np.sqrt(3.)
+        # Degree four in x on each interval, including the discharge primitive.
+        nodes = mid[:, None] + half[:, None] * np.array([-1., 0., 1.]) * np.sqrt(3. / 5.)
         yl, yr = np.maximum(y0, nodes + lower), np.minimum(y1, nodes + upper)
         integrand = root2 * np.where(yr > yl, primitive(nodes, yr) - primitive(nodes, yl), 0.)
-        result[j, i] = (half @ integrand.sum(axis=1)) / ((x1 - x0) * (y1 - y0) * fraction[j, i])
+        integral = (integrand @ np.array([5., 8., 5.]) / 9.) @ half
+        result[:, j, i] = integral / ((x1 - x0) * (y1 - y0) * fraction[j, i])
     return result
 
 
@@ -240,8 +301,13 @@ def verify_shallow(executable, directory, rdmds, size, case):
     initial_volume = np.sum(area * depth)
     initial_content = np.sum(area * depth * tracer)
     volume_drift, tracer_drift, rest_drift, momentum_drift = 0., 0., 0., 0.
+    local_budget_error = np.zeros(2)
+    previous = storage(area, read('CCDepth', 0), read('CCTracer', 0))
+    trace = None
     threshold = 1e-3
     new_wet, dried = 0, 0
+    cut_wet, cut_dried = 0, 0
+    cut_cells = (fraction > 0.) & (fraction < 1.)
     was_wet = depth > threshold
     for step in range(1, steps + 1):
         h, c = read('CCDepth', step), read('CCTracer', step)
@@ -251,18 +317,34 @@ def verify_shallow(executable, directory, rdmds, size, case):
             raise AssertionError('negative water depth or transport into solid cells')
         if np.any((c[h > 0.] < 0.2 - 2e-14) | (c[h > 0.] > 0.4 + 2e-14)):
             raise AssertionError('tracer donor bound violated')
+        current = storage(area, h, c)
+        faces, residual = audit_faces(read, step, geometry, previous, current)
+        local_budget_error = np.maximum(local_budget_error, np.max(np.abs(residual), axis=(1, 2)))
+        if case == 'runup' and trace is None:
+            newly_wet = cut_cells & (previous[0] == 0.) & (h > threshold)
+            if np.any(newly_wet):
+                j, i = np.unravel_index(np.argmax(np.where(newly_wet, current[0], 0.)), area.shape)
+                trace = cell_trace(step, j, i, fraction, previous, current, faces, residual)
+        previous = current
         volume_drift = max(volume_drift, abs(np.sum(area * h) - initial_volume))
         tracer_drift = max(tracer_drift, abs(np.sum(area * h * c) - initial_content))
         rest_drift = max(rest_drift, np.max(np.abs(h - depth)))
         momentum_drift = max(momentum_drift, np.max(np.hypot(qx, qy)))
         is_wet = h > threshold
-        new_wet += int(np.count_nonzero(is_wet & ~was_wet))
-        dried += int(np.count_nonzero(~is_wet & was_wet))
+        wetting = is_wet & ~was_wet
+        drying = ~is_wet & was_wet
+        new_wet += int(np.count_nonzero(wetting))
+        dried += int(np.count_nonzero(drying))
+        cut_wet += int(np.count_nonzero(wetting & cut_cells))
+        cut_dried += int(np.count_nonzero(drying & cut_cells))
         was_wet = is_wet
     np.testing.assert_array_less([volume_drift, tracer_drift], 2e-11)
     result = {'dx_m': float(dx), 'duration_s': duration, 'wet_depth_threshold_m': threshold, 'wetting_events': new_wet,
-              'drying_events': dried, 'minimum_cut_area_fraction': float(fraction[active].min()),
-              'max_volume_drift_m3': float(volume_drift), 'max_tracer_content_drift': float(tracer_drift)}
+              'drying_events': dried, 'cut_cell_wetting_events': cut_wet, 'cut_cell_drying_events': cut_dried,
+              'minimum_cut_area_fraction': float(fraction[active].min()),
+              'max_volume_drift_m3': float(volume_drift), 'max_tracer_content_drift': float(tracer_drift),
+              'max_local_volume_budget_residual_m3': float(local_budget_error[0]),
+              'max_local_tracer_budget_residual': float(local_budget_error[1])}
     if case == 'rest':
         np.testing.assert_array_less([rest_drift, momentum_drift], 2e-12)
         if new_wet or dried:
@@ -271,12 +353,21 @@ def verify_shallow(executable, directory, rdmds, size, case):
     else:
         if new_wet == 0:
             raise AssertionError(f'{case} did not wet any initially dry cells')
-        if case == 'runup' and dried == 0:
-            raise AssertionError('run-up case did not exercise shoreline recession')
+        if case == 'runup':
+            if trace is None or cut_dried == 0:
+                raise AssertionError('run-up must wet and recede across cells cut by the wall')
+            result['wetting_cell_trace'] = trace
         if case == 'dam':
-            exact = ritter_cell_average(edges, fraction)
-            np.testing.assert_allclose(np.sum(area * exact), initial_volume, atol=4e-13, rtol=0)
-            result['area_weighted_depth_l1_m'] = float(np.sum(area * np.abs(h - exact)) / np.sum(area))
+            exact_h, exact_q = ritter_cell_averages(edges, fraction)
+            np.testing.assert_allclose(np.sum(area * exact_h), initial_volume, atol=4e-13, rtol=0)
+            channel_width = np.sqrt(2.) * STRIP_EDGE
+            exact_momentum = 0.5 * GRAVITY * channel_width * DAM_TIME
+            np.testing.assert_allclose(np.sum(area * exact_q), exact_momentum, atol=4e-13, rtol=0)
+            along_discharge = (qx + qy) / np.sqrt(2.)
+            across_discharge = (qy - qx) / np.sqrt(2.)
+            for key, error in (('depth_l1_m', h - exact_h), ('streamwise_discharge_l1_m2_s', along_discharge - exact_q),
+                               ('cross_stream_discharge_l1_m2_s', across_discharge)):
+                result[f'area_weighted_{key}'] = float(np.sum(area * np.abs(error)) / np.sum(area))
     return result
 
 
@@ -312,6 +403,12 @@ def main():
     if not np.all(rates > 0.35) or errors[-1] >= 0.02:
         raise AssertionError(f'Ritter depth error did not decrease at the required rate: {errors}')
     report['dam_break_observed_orders'] = rates.tolist()
+    discharge = np.array([case['area_weighted_streamwise_discharge_l1_m2_s'] for case in report['dam_break']])
+    if not np.all(np.diff(discharge) < 0.):
+        raise AssertionError(f'Ritter streamwise discharge error did not decrease: {discharge}')
+    across = np.array([case['area_weighted_cross_stream_discharge_l1_m2_s'] for case in report['dam_break']])
+    if not np.all(np.diff(across) < 0.) or across[0] >= 1e-3:
+        raise AssertionError(f'cross-channel discharge exceeded the convergence check: {across}')
     result = json.dumps(report, indent=2, allow_nan=False) + '\n'
     (workdir / 'report.json').write_text(result)
     print(result, end='')

@@ -71,6 +71,8 @@ The validation overlay builds against the pinned `checkpoint69s` source via `gen
 | `ccMode=1` | Replace wet `rA` and open `dyG`/`dxG` and their reciprocals before `INI_CG2D`. Stock `CG2D`, pressure-gradient correction, and `exactConserv` use the effective geometry. `DXC`, `DYC` and the vertical `hFac` fields retain their original values. | The overlay advects passive tracer with the final native `U`/`V` volume transport. The donor bound is enforced before updating tracer. |
 | `ccMode=2` | Advance a nonlinear, depth-averaged finite-volume state inside MITgcm's native timestep loop and write named MDS diagnostics. This mode has its own pressure flux and momentum update. | Water volume, horizontal discharge and passive tracer content. Dry cells can receive water. |
 
+The call paths are explicit in `cc_driver.F`. Mode 1 applies geometry in `CC_SETUP`, enters the stock `FORWARD_STEP`, and calls `CC_TRANSFER` with the resulting `U` and `V`. Mode 2 dispatches from `CC_FORWARD_STEP` to `CC_SWE_ADVANCE`, which calls `CC_TRANSFER` once per explicit CFL substep. [Driver](../validation/mitgcm_cutcell/cc_driver.F) · [Nonlinear step and shared transfer](../validation/mitgcm_cutcell/cc_shallow_water.F)
+
 Supply `&CUTCELL_PARM ccMode=1, /` or `ccMode=2` in `data.cutcell`. The verifier generates both cases and the binary inputs. To prepare custom cases, write IEEE big-endian binary64 arrays in the following order with x varying fastest and no record markers.
 
 | File | Consecutive fields |
@@ -86,22 +88,49 @@ With piecewise-constant bed, the cell's stored volume is $V_i=A_i h_i$ and trace
 
 For each face with Rusanov wave bound $a_f$, an outgoing mass flux is bounded by $a_f h_i^*$ times its open length. Choosing the substep from the wet polygon area divided by the sum of face wave bounds times open lengths, with Courant factor 0.4, bounds total outflow by the available donor volume. The solver updates water and tracer using the same transfers and retains water and tracer in shallow cells. A $10^{-10}\,\mathrm{m}$ denominator floor regularizes velocity at vanishing depth. Small cut fractions reduce the explicit substep. The scheme is first-order and subdivides each model clock interval using a grid-wide CFL bound.
 
+### Audit a cell from native outputs
+
+Set `ccWriteFluxes=.TRUE.` in `data.cutcell` to emit four extra MDS fields at the end of each clock step. The verifier enables this setting. Each field records the **signed amount transferred over the interval**, in m³ for water and m³ times concentration for tracer. For mode 2 the field sums the CFL substeps. The donor-volume check still runs on each individual substep.
+
+| MDS field | Face and sign |
+| --- | --- |
+| `CCVolW`, `CCTrW` | West face of cell `(i,j)`, positive eastward |
+| `CCVolS`, `CCTrS` | South face of cell `(i,j)`, positive northward |
+
+The east face of `(i,j)` is the west face of `(i+1,j)`. The north face is the south face of `(i,j+1)`. The omitted exterior east/north faces are closed. The checker reconstructs both balances cell by cell from $A h$ and $A h c$. It checks $\Delta V=F_W-F_E+F_S-F_N$ and the same expression for tracer content. Every recorded closed face must carry exactly zero transfer. The allowed residual is 512 binary64 epsilons times the local scale formed by old and new storage and the absolute transfers, with a minimum scale of one in the stored units.
+
+These are the actual Fortran outputs for two cells at iteration 1. The face columns use the coordinate signs above. The time step is 15 s for the linear case and 0.2 s for shoreline run-up.
+
+| Case and one-based cell `(i,j)` | West (m³) | East (m³) | South (m³) | North (m³) | Change in stored water (m³) | Absolute residual (m³) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Linear `(5,3)` | −34.212160 | −77.942425 | −9.772283 | 0 | +33.957982 | $3.12\times10^{-11}$ |
+| Initially dry wall-cut cell `(35,30)` | $2.179173\times10^{-4}$ | 0 | $9.524823\times10^{-5}$ | 0 | $3.131655\times10^{-4}$ | $1.08\times10^{-19}$ |
+
 ### Native verification command
 
 ```sh
 python validation/verify_native_cutcell.py ../MITgcm validation/results/mitgcm_native --jobs 4
+jq '.linear.cut_cell_trace, .shoreline_runup.wetting_cell_trace, .dam_break' validation/results/mitgcm_native/report.json
 ```
 
-The verifier builds an unforced linear cut basin with a fixed wet mask and checks stock native pressure, velocity, and continuity against the independent Python operators. It checks native tracer against the shared-flux update, verifies the opt-out run against the uncut operators, and confirms that the cut geometry changes the result. The nonlinear suite uses three resolutions in a 45-degree channel. It checks a sloped-bed lake at rest, a disturbed sloped shoreline, and a dry-bed dam break against the Ritter cell-average solution. The reference integrates depth over each clipped polygon by splitting the integral at all geometric and wavefront transitions. The verifier checks MITgcm's reported model clock, positivity, water and tracer budgets, tracer bounds and convergence. [Yaegashi's channel experiment, §3.3](https://arxiv.org/html/2610.16148v1#S3.SS3) · [SWASHES, §4.1.2](https://doi.org/10.1002/fld.3741)
+The verifier builds an unforced linear cut basin with a fixed wet mask and checks stock native pressure, velocity, and continuity against the independent Python operators. It checks each recorded native tracer transfer against the donor concentration and native water transfer. The nonlinear suite uses three resolutions in a 45-degree channel. It checks a sloped-bed lake at rest, a disturbed sloped shoreline, and a dry-bed dam break against the Ritter cell averages. The reference integrates depth and streamwise discharge over each clipped polygon by splitting the integral at geometric and wavefront transitions. It also checks the analytic reservoir volume and the integrated streamwise momentum from the upstream hydrostatic pressure. The verifier checks MITgcm's reported clock, positivity, local and global water and tracer budgets, and tracer bounds. [Yaegashi's channel experiment, §3.3](https://arxiv.org/html/2610.16148v1#S3.SS3) · [SWASHES, §4.1.2](https://doi.org/10.1002/fld.3741)
 
 | Native benchmark | Observed result |
 | --- | ---: |
 | Linear cut basin, maximum surface / velocity difference versus Python | $1.45\times10^{-15}$ m / $9.02\times10^{-17}$ m/s |
 | Linear cut basin, maximum transport depth mismatch against native continuity | $4.88\times10^{-15}$ m |
+| Linear cut basin, maximum local water-budget residual | $8.48\times10^{-11}$ m³ |
 | Sloped-bed lake at rest, maximum depth / discharge drift across three grids | $1.11\times10^{-16}$ m / $1.66\times10^{-16}$ m²/s |
-| Disturbed shoreline, wetting / drying events at a 1 mm diagnostic threshold | 13 / 7 |
+| Disturbed shoreline, wetting / drying events at a 1 mm diagnostic threshold | 13 / 7 overall, 4 / 2 in wall-cut cells |
 | Disturbed shoreline, maximum absolute water-volume drift | $5.33\times10^{-15}$ m³ |
-| Dry-bed dam break, area-weighted depth error at 0.5, 0.25 and 0.125 m spacing | 0.02467 m, 0.01785 m, 0.01199 m |
-| Dry-bed dam break, observed refinement orders | 0.47, 0.57 |
+| Disturbed shoreline, maximum local water-budget residual | $1.21\times10^{-16}$ m³ |
 
-The overlay is an experimental barotropic option. A general upstream package, MPI and tile exchange, pickups, moving immersed walls, the stock multilayer nonlinear free-surface solver, and laboratory-benchmark reproduction are separate work. [MITgcm nonlinear free-surface formulation](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html)
+| Grid spacing (m) | Dam-break depth error (m) | Streamwise discharge error (m²/s) | Cross-channel discharge error (m²/s) |
+| ---: | ---: | ---: | ---: |
+| 0.5 | 0.02467 | 0.05520 | 0.0004317 |
+| 0.25 | 0.01785 | 0.03993 | 0.0001136 |
+| 0.125 | 0.01199 | 0.02772 | 0.00004310 |
+
+The table reports area-weighted mean absolute errors at 1.2 s. Observed depth orders were 0.47 and 0.57. The exact cross-channel discharge is zero. Nonzero computed cross-channel discharge measures numerical error inside the channel. Closed-wall flux is checked separately.
+
+The code builds as an experiment-local overlay. Both modes require one process, one tile, one level, and a closed Cartesian grid. Mode 2 stores its prognostic state in `ccState` and writes `CCDepth`, `CCQx`, `CCQy`, and `CCTracer`. Pickup/restart support would need to serialize that state and restore the geometry and clock before stepping. Coupling moving shorelines to the stock multilayer solver would require wet-mask and aperture updates shared by `UPDATE_CG2D`, the velocity correction, `INTEGR_CONTINUITY`, and tracer advection. The current evidence covers analytic benchmarks on this serial configuration. [MITgcm nonlinear free-surface formulation](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html)

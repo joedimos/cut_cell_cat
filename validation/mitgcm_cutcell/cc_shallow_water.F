@@ -1,12 +1,14 @@
 #include "CPP_OPTIONS.h"
 
-      SUBROUTINE CC_TRANSFER(nx,ny,state,west,south)
+      SUBROUTINE CC_TRANSFER(nx,ny,state,west,south,record,ledger)
 C     Each internal face contributes one signed volume transfer and the
 C     same transfer times donor concentration to both adjacent cells.
       USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
       IMPLICIT NONE
       INTEGER nx,ny,i,j
+      LOGICAL record
       _RL state(4,nx,ny),west(nx+1,ny),south(nx,ny+1)
+      _RL ledger(4,nx,ny),tracer_flux
       _RL volume(nx,ny),content(nx,ny),donor(nx,ny)
       _RL incoming(nx,ny),outgoing(nx,ny)
       volume=state(1,:,:)
@@ -17,12 +19,20 @@ C     same transfer times donor concentration to both adjacent cells.
       content=0. _d 0
       DO j=1,ny
        DO i=2,nx
-        CALL transfer(i-1,j,i,j,west(i,j))
+        CALL transfer(i-1,j,i,j,west(i,j),tracer_flux)
+        IF (record) THEN
+         ledger(1,i,j)=ledger(1,i,j)+west(i,j)
+         ledger(3,i,j)=ledger(3,i,j)+tracer_flux
+        ENDIF
        ENDDO
       ENDDO
       DO j=2,ny
        DO i=1,nx
-        CALL transfer(i,j-1,i,j,south(i,j))
+        CALL transfer(i,j-1,i,j,south(i,j),tracer_flux)
+        IF (record) THEN
+         ledger(2,i,j)=ledger(2,i,j)+south(i,j)
+         ledger(4,i,j)=ledger(4,i,j)+tracer_flux
+        ENDIF
        ENDDO
       ENDDO
       IF ( ANY(outgoing.GT.volume) )
@@ -36,9 +46,10 @@ C     same transfer times donor concentration to both adjacent cells.
 
       CONTAINS
 
-      SUBROUTINE transfer(il,jl,ir,jr,f)
+      SUBROUTINE transfer(il,jl,ir,jr,f,q)
       INTEGER il,jl,ir,jr,di,dj,ri,rj
-      _RL f,amount
+      _RL f,q,amount,mass
+      q=0. _d 0
       IF (f.EQ.0. _d 0) RETURN
       di=il
       dj=jl
@@ -51,22 +62,26 @@ C     same transfer times donor concentration to both adjacent cells.
        rj=jl
       ENDIF
       amount=ABS(f)
+      mass=amount*donor(di,dj)
+      q=SIGN(1. _d 0,f)*mass
       outgoing(di,dj)=outgoing(di,dj)+amount
       incoming(ri,rj)=incoming(ri,rj)+amount
-      content(ri,rj)=content(ri,rj)+amount*donor(di,dj)
+      content(ri,rj)=content(ri,rj)+mass
       END SUBROUTINE transfer
       END
 
       SUBROUTINE CC_SWE_ADVANCE(nx,ny,area,west,south,bed,g,interval,
-     &                          state)
+     &                          state,record,ledger)
 C     Unsplit hydrostatic reconstruction with local Lax-Friedrichs flux.
 C     Piecewise constant bed/state. Cartesian grid clipped by straight
 C     slip walls, at most one immersed wall segment per cell.
       USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
       IMPLICIT NONE
       INTEGER nx,ny,i,j,substeps
+      LOGICAL record
       _RL area(nx,ny),west(nx+1,ny),south(nx,ny+1),bed(nx,ny),g
       _RL interval,state(4,nx,ny),time_left,dt
+      _RL ledger(4,nx,ny)
       _RL depth(nx,ny),vel(2,nx,ny),speed(nx,ny),rate(2,nx,ny)
       _RL fx(nx+1,ny),fy(nx,ny+1)
       _RL cfl,velocity_depth_floor
@@ -124,7 +139,7 @@ C         the clipped polygon. Treat box faces as separate slip walls.
        IF (.NOT.IEEE_IS_FINITE(dt) .OR. dt.LE.0. _d 0
      &     .OR. time_left-dt.EQ.time_left)
      &  STOP 'CUTCELL invalid CFL substep'
-       CALL CC_TRANSFER(nx,ny,state,dt*fx,dt*fy)
+       CALL CC_TRANSFER(nx,ny,state,dt*fx,dt*fy,record,ledger)
        state(2:3,:,:)=state(2:3,:,:)+dt*rate
        IF (ANY(.NOT.IEEE_IS_FINITE(state)))
      &  STOP 'CUTCELL nonfinite shallow-water state'

@@ -12,7 +12,7 @@
       INTEGER myThid,unit,ios,nbytes,i,j,edge
       LOGICAL enabled
       _RL fractions(sNx,sNy)
-      NAMELIST /CUTCELL_PARM/ ccMode
+      NAMELIST /CUTCELL_PARM/ ccMode,ccWriteFluxes
 
       INQUIRE(FILE='data.cutcell',EXIST=enabled)
       IF (.NOT.enabled) THEN
@@ -26,6 +26,7 @@
      &     ACTION='READ',IOSTAT=ios)
       IF (ios.NE.0) STOP 'CUTCELL cannot open data.cutcell'
       ccMode=0
+      ccWriteFluxes=.FALSE.
       READ(unit,NML=CUTCELL_PARM,IOSTAT=ios)
       CLOSE(unit)
       IF (ios.NE.0 .OR. ccMode.LT.1 .OR. ccMode.GT.2)
@@ -161,6 +162,7 @@ C     dry border suppresses the model's default periodic seam.
 #include "CUT_CELL.h"
       INTEGER iloop,myIter,myThid,i,j
       _RL myTime,west(sNx+1,sNy),south(sNx,sNy+1)
+      _RL ledger(4,sNx,sNy)
 
       IF (ccMode.EQ.0) THEN
        CALL FORWARD_STEP(iloop,myTime,myIter,myThid)
@@ -170,6 +172,7 @@ C     dry border suppresses the model's default periodic seam.
        CALL CC_INITIAL_STATE
        CALL CC_WRITE_STATE(nIter0,myThid)
       ENDIF
+      IF (ccWriteFluxes) ledger=0. _d 0
       IF (ccMode.EQ.1) THEN
        CALL FORWARD_STEP(iloop,myTime,myIter,myThid)
        west=0. _d 0
@@ -182,16 +185,38 @@ C     dry border suppresses the model's default periodic seam.
      &      *vVel(i,j,1,1,1)*deltaTClock
         ENDDO
        ENDDO
-       CALL CC_TRANSFER(sNx,sNy,ccState,west,south)
+       CALL CC_TRANSFER(sNx,sNy,ccState,west,south,
+     &                  ccWriteFluxes,ledger)
       ELSE
        CALL CC_SWE_ADVANCE(sNx,sNy,ccArea,ccWest,ccSouth,ccBed,
-     &                     gravity,deltaTClock,ccState)
+     &                     gravity,deltaTClock,ccState,
+     &                     ccWriteFluxes,ledger)
        myIter=nIter0+iloop
        myTime=startTime+deltaTClock*iloop
       ENDIF
       CALL CC_WRITE_STATE(myIter,myThid)
+      IF (ccWriteFluxes) CALL CC_WRITE_FLUXES(ledger,myIter,myThid)
       WRITE(standardMessageUnit,'(A,I8,1X,ES24.16)')
      & 'CUTCELL clock ',myIter,myTime
+      END
+
+      SUBROUTINE CC_WRITE_FLUXES(ledger,myIter,myThid)
+C     Signed transfers over one MITgcm clock interval. West/eastward
+C     and south/northward follow native MDS indexing. Exterior faces
+C     are closed, including the unrecorded terminal east/north faces.
+      IMPLICIT NONE
+#include "SIZE.h"
+#include "EEPARAMS.h"
+      INTEGER myIter,myThid,k
+      _RL ledger(4,sNx,sNy)
+      _RL field(1-OLx:sNx+OLx,1-OLy:sNy+OLy,nSx,nSy)
+      CHARACTER*6 names(4)
+      DATA names /'CCVolW','CCVolS','CCTrW ','CCTrS '/
+      field=0. _d 0
+      DO k=1,4
+       field(1:sNx,1:sNy,1,1)=ledger(k,:,:)
+       CALL WRITE_FLD_XY_RL(names(k),'I10',field,myIter,myThid)
+      ENDDO
       END
 
       SUBROUTINE CC_INITIAL_STATE
