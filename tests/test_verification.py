@@ -75,6 +75,15 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][0], '/configured/lean')
 
     @unittest.skipUnless(shutil.which('lean'), 'Lean executable not installed')
+    def test_categorical_conservation_theorems(self):
+        root = Path(__file__).resolve().parents[1]
+        proof = root / 'verification' / 'CategoricalConservation.lean'
+        result = subprocess.run(['lean', str(proof)], cwd=root, text=True,
+                                capture_output=True, timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('declaration uses', result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which('lean'), 'Lean executable not installed')
     def test_real_lean_accepts_valid_and_rejects_invalid_certificate(self):
         server = LeanVerificationServer()
         _, _, meta = server.verify_budget(self.budget)
