@@ -51,7 +51,7 @@ Important distinctions are enforced by tests:
 
 ## MITgcm and horizontal cut cells
 
-The bridge reads native MITgcm MDS geometry and replays the fully implicit linear barotropic stage. The separate oblique-wall experiment adds lateral area fractions and shared face apertures, checks the 2-D conservative coarse-grid chain map, and advances a tracer using the same volume flux. A wet-donor ghost stencil implements the relevant interpolation and reflection from Yaegashi. See the [MITgcm verification case and derivation](docs/MITGCM_CUT_CELLS.md) for the native comparison, the experimental scope, and reproduction commands.
+The bridge reads native MITgcm MDS geometry, replays the fully implicit linear barotropic stage, and checks the 2-D conservative coarse-grid chain map. A native Fortran overlay adds horizontal cut cells to the stock implicit stage and a one-layer nonlinear mode for wetting and drying. Both modes advect a passive tracer with the same volume transfers as continuity. The nonlinear tests include a sloped-bed lake at rest and a dry-bed dam break in an oblique channel against the Ritter solution. See the [MITgcm verification cases and derivation](docs/MITGCM_CUT_CELLS.md) for scope and reproduction commands.
 
 ## WeatherNext 3 structure
 

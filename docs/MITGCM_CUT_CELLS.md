@@ -1,8 +1,8 @@
 # MITgcm and horizontal cut-cell continuity
 
-`cutcell.research.mitgcm` connects the project's incidence, volume-weighted transport, and finite Markov kernels to a native MITgcm verification case and an experimental oblique wall. The native comparison covers a closed, static, Cartesian, hydrostatic, one-layer basin with a linear free surface, `exactConserv`, fully implicit surface pressure and divergence, and no external forcing, Coriolis, momentum advection, or viscosity. The Python stage solves the same linear pressure–continuity subsystem directly from MITgcm's MDS grid and state files. [MITgcm checkpoint69s](https://github.com/MITgcm/MITgcm/tree/fef697a599dd2ad9918d2876d17b68764d32f871) · [MITgcm algorithm](https://mitgcm.readthedocs.io/en/latest/algorithm/algorithm.html)
+`cutcell.research.mitgcm` connects the project's incidence, volume-weighted transport, and finite Markov kernels to MITgcm. The experiment-local Fortran overlay adds a fixed-geometry mode to the native implicit pressure step and a nonlinear shallow-water mode for wetting and drying. The native comparison covers a closed, static, Cartesian, hydrostatic, one-layer basin with a linear free surface, `exactConserv`, fully implicit surface pressure and divergence, and no external forcing, Coriolis, momentum advection, or viscosity. The Python stage solves the same linear pressure–continuity subsystem directly from MITgcm's MDS grid and state files. [MITgcm checkpoint69s](https://github.com/MITgcm/MITgcm/tree/fef697a599dd2ad9918d2876d17b68764d32f871) · [MITgcm algorithm](https://mitgcm.readthedocs.io/en/latest/algorithm/algorithm.html)
 
-Yaegashi's paper keeps ghost-cell momentum and replaces depth continuity with a shared, aperture-weighted flux. It uses hydrostatic reconstruction, signed sliver and pool bookkeeping, and a depth-floor redistribution in an explicit shallow-water solver. Its ghost reconstruction masks solid and dry donors and applies a common normalized stencil to surface, bed, and discharge. The bridge takes the shared-flux construction into a linear implicit C-grid pressure solve. The ghost stencil is a separate reconstruction primitive for future wall momentum and shoreline work. [Yaegashi, arXiv:2610.16148v1, §§2.2–2.7](https://arxiv.org/html/2610.16148v1)
+Yaegashi's paper keeps ghost-cell momentum and replaces depth continuity with a shared, aperture-weighted flux. It uses hydrostatic reconstruction, signed sliver and pool bookkeeping, and a depth-floor redistribution in an explicit shallow-water solver. Its ghost reconstruction masks solid and dry donors and applies a common normalized stencil to surface, bed, and discharge. The fixed-geometry mode takes the shared-flux construction into MITgcm's implicit C-grid pressure solve. The nonlinear mode uses the same geometric conservation principle with hydrostatic reconstruction and a slip-reflected ghost state at each wall. The masked bilinear ghost stencil is also available as a separate primitive. [Yaegashi, arXiv:2610.16148v1, §§2.2–2.7](https://arxiv.org/html/2610.16148v1)
 
 ## Geometry and source mapping
 
@@ -50,7 +50,7 @@ python -m pip install .
 python validation/compare_mitgcm.py ../MITgcm validation/results/mitgcm --jobs 4
 ```
 
-The command builds MITgcm via `genmake2` and runs five 15-second steps in an unforced basin with nonuniform spacing, an island, and ten partial-bottom columns. It reads native 64-bit `Eta`, `U`, and `V` snapshots, checks each step against the bridge using the preceding native state, and audits the native continuity budget separately. A second native run starts from uniform surface height. The oblique wall is a separate Python experiment. Metrics are written to `validation/results/mitgcm/report.json`.
+The command builds MITgcm via `genmake2` and runs five 15-second steps in an unforced basin with nonuniform spacing, an island, and ten partial-bottom columns. It reads native 64-bit `Eta`, `U`, and `V` snapshots, checks each step against the bridge using the preceding native state, and audits the native continuity budget separately. A second native run starts from uniform surface height. This first command also runs the independent Python oblique-wall audit. Metrics are written to `validation/results/mitgcm/report.json`.
 
 | Check | Observed result |
 | --- | ---: |
@@ -62,6 +62,46 @@ The command builds MITgcm via `genmake2` and runs five 15-second steps in an unf
 | Maximum oblique cell-volume budget defect | \(4.03\times10^{-14}\,\mathrm{m^3}\) |
 | Oblique constant-tracer maximum difference | \(1.11\times10^{-16}\) |
 
-## Extending to moving shorelines in MITgcm
+## Native Fortran option
 
-The next testable extension is a nonlinear storage law \(V_i(\eta)=\int_{P_i\cap\mathrm{fluid}}(\eta-z_b(x,y))_+\,dA\), paired with one wetted cross-section per face and a stagewise shared flux. Validate a dry front crossing an oblique wall over a sloped bed before testing a dam break. With dynamic apertures, the pressure matrix, velocity correction, `exactConserv` continuity, and tracer fluxes need the same time-level geometry. `update_surf_dr.F` and `update_r_star.F` already update vertical thickness for nonlinear free surfaces, so a future native implementation would keep lateral geometry separately and audit when each operator reads it. Nonlinear wetting and drying, curved-wall convergence, and a native Fortran cut-cell option remain open. [MITgcm nonlinear free surface](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html) · [Yaegashi's test suite](https://arxiv.org/html/2610.16148v1#S3)
+The validation overlay builds against the pinned `checkpoint69s` source via `genmake2 -mods`. It injects an initialization hook after `INI_MASKS_ETC` and a dispatch hook around `FORWARD_STEP`. In the absence of `data.cutcell` it follows the normal MITgcm step. An enabled case selects one of two serial, one-tile, one-level modes on a closed Cartesian domain.
+
+| Mode | Native integration | Advected quantities |
+| --- | --- | --- |
+| `ccMode=1` | Replace wet `rA` and open `dyG`/`dxG` and their reciprocals before `INI_CG2D`. Stock `CG2D`, pressure-gradient correction, and `exactConserv` use the effective geometry. `DXC`, `DYC` and the vertical `hFac` fields retain their original values. | The overlay advects passive tracer with the final native `U`/`V` volume transport. The donor bound is enforced before updating tracer. |
+| `ccMode=2` | Advance a nonlinear, depth-averaged finite-volume state inside MITgcm's native timestep loop and write named MDS diagnostics. This mode has its own pressure flux and momentum update. | Water volume, horizontal discharge and passive tracer content. Dry cells can receive water. |
+
+Supply `&CUTCELL_PARM ccMode=1, /` or `ccMode=2` in `data.cutcell`. The verifier generates both cases and the binary inputs. To prepare custom cases, write IEEE big-endian binary64 arrays in the following order with x varying fastest and no record markers.
+
+| File | Consecutive fields |
+| --- | --- |
+| `cut_geometry.bin` | Planform area fraction `(nx, ny)`, west/east face apertures `(nx+1, ny)`, south/north face apertures `(nx, ny+1)` |
+| `cut_initial.bin` | Bed elevation, water depth, x and y velocities, and passive tracer concentration, each `(nx, ny)` |
+
+Mode 1 takes initial depth from native `Eta` and bathymetry and requires the cut cells and open faces to agree with the fixed native masks. Its perimeter is dry. Mode 2 takes its state from `cut_initial.bin`, closes the box boundaries, and allows at most one straight immersed wall segment per cell. Geometry is fixed in planform while water depth and reconstructed wetted face cross-section evolve. The output fields are `CCDepth` and `CCTracer` in both modes and `CCQx` and `CCQy` for nonlinear discharge. These fields describe the overlay state. For mode 1, standard `Eta`, `U`, and `V` are the native implicit solution.
+
+### Nonlinear conservation, wetting and drying
+
+With piecewise-constant bed, the cell's stored volume is $V_i=A_i h_i$ and tracer content is $V_i c_i$. Each face has one geometric opening and one signed hydrostatically reconstructed Rusanov volume flux. At a bed step, reconstruct the depths against the higher bed, $h_i^*=\max(0,\eta_i-\max(z_i,z_j))$, capped by the local depth for roundoff. The matching hydrostatic pressure correction and the immersed-wall pressure use the outward-normal closure of the clipped cell. The reflected ghost state reverses only normal discharge. This gives exactly zero wall mass flux and leaves the lake at rest over a discontinuous bed, including when a shoreline crosses a wall. [Audusse et al., §2](https://publications.imp.fu-berlin.de/478/) · [Yaegashi, §§2.3–2.6](https://arxiv.org/html/2610.16148v1)
+
+For each face with Rusanov wave bound $a_f$, an outgoing mass flux is bounded by $a_f h_i^*$ times its open length. Choosing the substep from the wet polygon area divided by the sum of face wave bounds times open lengths, with Courant factor 0.4, bounds total outflow by the available donor volume. The solver updates water and tracer using the same transfers and retains water and tracer in shallow cells. A $10^{-10}\,\mathrm{m}$ denominator floor regularizes velocity at vanishing depth. Small cut fractions reduce the explicit substep. The scheme is first-order and subdivides each model clock interval using a grid-wide CFL bound.
+
+### Native verification command
+
+```sh
+python validation/verify_native_cutcell.py ../MITgcm validation/results/mitgcm_native --jobs 4
+```
+
+The verifier builds an unforced linear cut basin with a fixed wet mask and checks stock native pressure, velocity, and continuity against the independent Python operators. It checks native tracer against the shared-flux update, verifies the opt-out run against the uncut operators, and confirms that the cut geometry changes the result. The nonlinear suite uses three resolutions in a 45-degree channel. It checks a sloped-bed lake at rest, a disturbed sloped shoreline, and a dry-bed dam break against the Ritter cell-average solution. The reference integrates depth over each clipped polygon by splitting the integral at all geometric and wavefront transitions. The verifier checks MITgcm's reported model clock, positivity, water and tracer budgets, tracer bounds and convergence. [Yaegashi's channel experiment, §3.3](https://arxiv.org/html/2610.16148v1#S3.SS3) · [SWASHES, §4.1.2](https://doi.org/10.1002/fld.3741)
+
+| Native benchmark | Observed result |
+| --- | ---: |
+| Linear cut basin, maximum surface / velocity difference versus Python | $1.45\times10^{-15}$ m / $9.02\times10^{-17}$ m/s |
+| Linear cut basin, maximum transport depth mismatch against native continuity | $4.88\times10^{-15}$ m |
+| Sloped-bed lake at rest, maximum depth / discharge drift across three grids | $1.11\times10^{-16}$ m / $1.66\times10^{-16}$ m²/s |
+| Disturbed shoreline, wetting / drying events at a 1 mm diagnostic threshold | 13 / 7 |
+| Disturbed shoreline, maximum absolute water-volume drift | $5.33\times10^{-15}$ m³ |
+| Dry-bed dam break, area-weighted depth error at 0.5, 0.25 and 0.125 m spacing | 0.02467 m, 0.01785 m, 0.01199 m |
+| Dry-bed dam break, observed refinement orders | 0.47, 0.57 |
+
+The overlay is an experimental barotropic option. A general upstream package, MPI and tile exchange, pickups, moving immersed walls, the stock multilayer nonlinear free-surface solver, and laboratory-benchmark reproduction are separate work. [MITgcm nonlinear free-surface formulation](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html)

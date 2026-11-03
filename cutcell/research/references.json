@@ -2,6 +2,16 @@
   "schema_version": 4,
   "reviewed_on": "2026-11-03",
   "sources": {
+    "audusse_2004": {
+      "title": "A Fast and Stable Well-Balanced Scheme with Hydrostatic Reconstruction for Shallow Water Flows",
+      "authors": "Emmanuel Audusse, François Bouchut, Marie-Odile Bristeau, Rupert Klein and Benoît Perthame",
+      "url": "https://publications.imp.fu-berlin.de/478/"
+    },
+    "swashes": {
+      "title": "SWASHES: a compilation of shallow water analytic solutions for hydraulic and environmental studies",
+      "authors": "Olivier Delestre et al.",
+      "url": "https://doi.org/10.1002/fld.3741"
+    },
     "mitgcm": {
       "title": "MIT General Circulation Model",
       "commit": "fef697a599dd2ad9918d2876d17b68764d32f871",
@@ -31,6 +41,9 @@
     }
   },
   "mapping": [
+    {"source":"mitgcm","locator":"model/src/initialise_fixed.F, main_do_loop.F, ini_cg2d.F, integr_continuity.F and solve_for_pressure.F","implementation":"validation/mitgcm_cutcell/cc_driver.F mode 1","status":"experiment-local Fortran overlay with native linear pressure, corrected velocities and exactConserv continuity; shared passive-tracer volume flux","validation":"validation/verify_native_cutcell.py linear case"},
+    {"source":"audusse_2004","locator":"Section 2, hydrostatic reconstruction","implementation":"validation/mitgcm_cutcell/cc_shallow_water.F","status":"first-order hydrostatic Rusanov flux with shared open lengths, slip wall pressure, polygon-area CFL, and nonnegative depth","validation":"validation/verify_native_cutcell.py shoreline cases"},
+    {"source":"swashes","locator":"Section 4.1.2, Ritter dry-bed dam break","implementation":"validation/verify_native_cutcell.py ritter_cell_average","status":"analytical depth integrated over the clipped channel polygon and compared at three resolutions","validation":"validation/verify_native_cutcell.py oblique dry-bed dam break"},
     {"source":"mitgcm","locator":"model/src/write_grid.F, integr_continuity.F, calc_div_ghat.F, ini_cg2d.F and solve_for_pressure.F","implementation":"cutcell.research.mitgcm.BarotropicGrid","status":"closed, static, fully implicit linear barotropic C-grid subsystem","validation":"validation/compare_mitgcm.py"},
     {"source":"yaegashi_2026","locator":"Sections 2.2 and 2.6, equation (18)","implementation":"cutcell.research.mitgcm.half_plane_fractions and BarotropicGrid.step","status":"shared aperture-weighted continuity, applied to an implicit linear C-grid with fixed horizontal geometry","validation":"validation/compare_mitgcm.py oblique case"},
     {"source":"yaegashi_2026","locator":"Sections 2.3-2.5, equations (6)-(17)","implementation":"cutcell.research.mitgcm.ghost_kernel and reflected_ghost","status":"conditioned wet bilinear donors and slip reflection as standalone primitives","validation":"test_research_mitgcm.GhostTests"},
@@ -61,7 +74,7 @@
     "Pooled CRPS is a statistic after spatial pooling and therefore probes joint/spatial structure that marginal CRPS does not determine; its diagram is distinct from conservation/coarse-graining diagrams."
   ],
   "not_implemented": [
-    "Native Fortran immersed-boundary option, dynamic wetting and drying in the pressure solver, and Yaegashi's HLLC/MUSCL shallow-water time integrator and sliver/pool redistribution",
+    "General upstream MITgcm cut-cell package, parallel tile exchange and restarts, wetting and drying in the stock multilayer pressure solver, and Yaegashi's HLLC/MUSCL time integrator and sliver/pool redistribution",
     "Global spherical ocean dynamics, nonlinear momentum, Coriolis/buoyancy coupling, nonlinear free-surface evolution, moving vertical coordinates, and the full mimetic C-grid operator set",
     "AC/DC option S3-a, complete GCM time stepping, or an end-to-end pseudo-density/velocity/pressure/tracer ocean core",
     "Korn's Section 7-8 telescoping-mesh numerical experiments and reported runtime ratios",

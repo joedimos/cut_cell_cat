@@ -73,7 +73,9 @@ jobs:
           path: oceananigans.csv*
   mitgcm:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      OPENBLAS_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -88,7 +90,10 @@ jobs:
       - run: command -v gfortran || (sudo apt-get update && sudo apt-get install -y gfortran)
       - run: python -m pip install .
       - run: python validation/compare_mitgcm.py upstream/MITgcm validation/results/mitgcm
+      - run: python validation/verify_native_cutcell.py upstream/MITgcm validation/results/mitgcm_native
       - uses: actions/upload-artifact@v4
         with:
           name: mitgcm-reference
-          path: validation/results/mitgcm/report.json
+          path: |
+            validation/results/mitgcm/report.json
+            validation/results/mitgcm_native/report.json

@@ -185,11 +185,12 @@ class BarotropicGrid:
         return aggregate, face_map, _incidence(coarse, edges[:, 0], edges[:, 1])
 
 
-def half_plane_fractions(x_edges, y_edges, normal, offset):
+def half_plane_fractions(x_edges, y_edges, normal, offset, *, full_faces=False):
     """Clip Cartesian cells and shared faces to normal dot (x,y) > offset.
 
-    Returns cell, west and south fractions on the same (y, x) indexing. The
-    polygon/segment clipping is exact in real arithmetic and uses float64 here.
+    Returns cell, west and south fractions on the same (y, x) indexing.
+    With full_faces, west/south also include the terminal east/north face.
+    Clipping is exact in real arithmetic and uses float64 here.
     """
     x, y, normal = (np.asarray(a, dtype=float) for a in (x_edges, y_edges, normal))
     if any(a.ndim != 1 or a.size < 2 or not np.all(np.isfinite(a))
@@ -214,8 +215,8 @@ def half_plane_fractions(x_edges, y_edges, normal, offset):
         fraction[cross] = crossing_ratio(np.maximum(a[cross], b[cross]), np.minimum(a[cross], b[cross]))
         return fraction
 
-    west = segment_fraction(signed[:-1, :-1], signed[1:, :-1])
-    south = segment_fraction(signed[:-1, :-1], signed[:-1, 1:])
+    west = segment_fraction(signed[:-1, :], signed[1:, :])
+    south = segment_fraction(signed[:, :-1], signed[:, 1:])
     corners = np.array(((0., 0.), (1., 0.), (1., 1.), (0., 1.)))
     values = np.stack((signed[:-1, :-1], signed[:-1, 1:], signed[1:, 1:], signed[1:, :-1]), axis=-1)
     area = np.all(values > 0, axis=-1).astype(float)
@@ -234,7 +235,7 @@ def half_plane_fractions(x_edges, y_edges, normal, offset):
         p = np.asarray(polygon) - polygon[0]
         area[j, i] = np.clip(0.5 * abs(np.dot(p[:-1, 0], p[1:, 1])
                                       - np.dot(p[:-1, 1], p[1:, 0])), 0., 1.)
-    return area, west, south
+    return (area, west, south) if full_faces else (area, west[:, :-1], south[:-1, :])
 
 
 def ghost_kernel(x, y, fluid, wet=None, *, min_wet_weight=0.05):

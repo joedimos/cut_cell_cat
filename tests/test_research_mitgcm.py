@@ -43,6 +43,12 @@ class MitgcmGeometryTests(unittest.TestCase):
         assert_array_equal(west, [[0., 0.]])
         assert_array_equal(south, [[0., 1.]])
 
+    def test_full_face_geometry_includes_east_and_north_exterior_segments(self):
+        area, west, south = half_plane_fractions([0., 1., 2.], [0., 1.], (1., 1.), 1.5, full_faces=True)
+        assert_array_equal(area, [[0.125, 0.875]])
+        assert_array_equal(west, [[0., 0.5, 1.]])
+        assert_array_equal(south, [[0., 0.5], [0.5, 1.]])
+
     def test_quotient_merges_opposite_crossings_with_orientation(self):
         grid = rect_grid(2, 2)
         a, q, b_coarse = grid.quotient([1, 0, 0, 1])

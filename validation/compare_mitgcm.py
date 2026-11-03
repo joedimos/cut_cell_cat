@@ -24,6 +24,16 @@ def run_logged(command, directory, log):
         raise RuntimeError(f'{command[0]} failed. See {directory / log}')
 
 
+def build_model(upstream, build, mods, jobs):
+    build.mkdir()
+    optfile = upstream / 'tools' / 'build_options' / 'linux_amd64_gfortran'
+    run_logged([str(upstream / 'tools' / 'genmake2'), '-rootdir', str(upstream),
+                '-mods', str(mods), '-of', str(optfile), '-ieee'], build, 'genmake.log')
+    run_logged(['make', 'depend'], build, 'depend.log')
+    run_logged(['make', '-j', str(jobs)], build, 'make.log')
+    return build / 'mitgcmuv'
+
+
 def run_basin(executable, directory, *, rest):
     directory.mkdir()
     for name in ('data', 'data.pkg', 'eedata'):
@@ -149,14 +159,8 @@ def main():
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     upstream, workdir = args.mitgcm.resolve(), args.workdir.resolve()
-    build = workdir / 'build'
     workdir.mkdir(parents=True)
-    build.mkdir()
-    optfile = upstream / 'tools' / 'build_options' / 'linux_amd64_gfortran'
-    run_logged([str(upstream / 'tools' / 'genmake2'), '-rootdir', str(upstream),
-                '-mods', str(CASE), '-of', str(optfile), '-ieee'], build, 'genmake.log')
-    run_logged(['make', 'depend'], build, 'depend.log')
-    run_logged(['make', '-j', str(args.jobs)], build, 'make.log')
+    executable = build_model(upstream, workdir / 'build', CASE, args.jobs)
     sys.path.insert(0, str(upstream / 'utils' / 'python' / 'MITgcmutils'))
     from MITgcmutils import rdmds
 
@@ -164,7 +168,7 @@ def main():
                                                        text=True).strip()}
     for name in ('pulse', 'rest'):
         directory = workdir / name
-        run_basin(build / 'mitgcmuv', directory, rest=name == 'rest')
+        run_basin(executable, directory, rest=name == 'rest')
         report[name] = compare_native(directory, rdmds, rest=name == 'rest')
     report['oblique_cut_extension'] = oblique_case()
     result = json.dumps(report, indent=2, allow_nan=False) + '\n'
