@@ -9,6 +9,12 @@
 
 The repository is intentionally explicit about scope. It is **not** an Oceananigans port, a complete AC/DC ocean circulation model, a trained WeatherNext implementation, or a formal proof of either paper.
 
+
+The [categorical conservation research track](docs/CATEGORICAL_CONSERVATION.md)
+uses dynamic face masks, extensive balance defects and cellular flux traces
+to verify conservation across mesh and solver interfaces. The prior
+subgrid pressure model provides a numerical reference.
+
 ## Integrated mathematical architecture
 
 The current release treats three kinds of maps separately:
