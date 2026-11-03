@@ -10,10 +10,14 @@ Last reviewed: 2026-11-03.
 2. Casulli (2009), [high-resolution wetting and drying](https://doi.org/10.1002/fld.1896), analyzed a mildly nonlinear free-surface system and its mass balance through dry/wet transitions, including existence/uniqueness and an iterative scheme.
 3. Adcroft (2013), [porous barriers and thin-wall topography](https://doi.org/10.1016/j.ocemod.2013.03.002), already considers cut cells, subgrid-scale thin walls, and elevation-dependent transport openings in ocean circulation models.
 4. Brus et al. (2026), [subgrid coastal inundation in MPAS-Ocean / E3SM](https://doi.org/10.1029/2026MS005842), already use cell and edge wet-fraction integrals and subgrid hypsometry in a C-grid ocean model. **Their presented experiments use a single-layer barotropic configuration**, not stock MITgcm multilayer `rStar`.
-5. [MITgcm nonlinear-free-surface documentation](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html) describes native `rStar` and conservation-aware transport.
-6. MITgcm [PR #1048](https://github.com/MITgcm/MITgcm/pull/1048) proposes native nonlinear wetting/drying with per-column thin-film constraints, changing faces and outgoing flux limitation (still under review when inspected).
+5. Ersing, Goldberg & Winters (2025), [entropy-stable hydrostatic reconstructions for one- and multilayer shallow water](https://doi.org/10.1016/j.jcp.2025.113802), already combines positivity, well-balancing and entropy stability for wet/dry interfaces.
+6. Bhat et al. (2024), [spatiotemporally varying multilayer ratios near wet/dry fronts](https://doi.org/10.1002/fld.5249), explicitly treats multilayer transitions.
+7. Candy (2017), [implicit baroclinic/non-hydrostatic wetting and drying](https://doi.org/10.1016/j.advwatres.2017.02.004), already addresses three-dimensional, mass-conservative implicit inundation with baroclinic physics and conditioning.
+8. [MOM6 model capabilities](https://www.gfdl.noaa.gov/mom-ocean-model/) include ALE vertical remapping and conservative wetting/drying via vanishing layers; 3-D layer remapping cannot be treated as a missing general idea.
+9. [MITgcm nonlinear-free-surface documentation](https://mitgcm.readthedocs.io/en/latest/algorithm/nonlinear-freesurf.html) describes native `rStar` and conservation-aware transport.
+10. MITgcm [PR #1048](https://github.com/MITgcm/MITgcm/pull/1048) proposes native nonlinear wetting/drying with per-column thin-film constraints, changing faces and outgoing flux limitation (still under review when inspected).
 
-Therefore **exact planform capacity, elevation-dependent edge opening, and conservative wetting/drying are NOT new results**. Neither does implementing a convex implicit equation automatically yield a new theorem; these belong to established monotone free-surface / mixed finite-volume machinery.
+Therefore **exact planform capacity, elevation-dependent edge opening, conservative wetting/drying, well-balanced multilayer wet/dry reconstruction, and baroclinic implicit wetting/drying are NOT new results**. Neither does implementing a convex implicit equation automatically yield a new theorem; these belong to established monotone free-surface / mixed finite-volume machinery.
 
 ## Exact reference capacity
 
@@ -109,7 +113,7 @@ The internal exchanges are uniquely determined by cumulative deficits **only if*
 - a proved discrete mechanical/available-potential energy or entropy inequality in a stated regime;
 - robustness to small cut fractions without an unbounded timestep penalty or singular pressure system;
 - MPI seam and restart invariance with feature-disabled native parity;
-- demonstrable advantage over **Adcroft porous barriers, Brus et al. subgrid MPAS-Ocean, and the native MITgcm PR #1048** on equivalent 3-D benchmarks.
+- demonstrable advantage over **Adcroft porous barriers, Brus et al. subgrid MPAS-Ocean, Candy's implicit baroclinic method, MOM6 ALE/vanishing-layer treatment, and MITgcm PR #1048** on comparable 3-D benchmarks.
 
 These criteria should be checked against further literature (including 3-D schemes not found in this initial review) before any novelty claim. Merely reproducing `V(eta)` or `A(eta)`, or demonstrating budget cancellation, **does not pass the gate**.
 
