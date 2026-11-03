@@ -4,7 +4,8 @@
 
 - **CliMA/Oceananigans.jl** for the bounded scalar-diffusion numerical architecture,
 - **Peter Korn, arXiv:2608.25679v3**, *Foundations of Global Ocean Climate Modelling at all Scales*, for selected AC/DC ocean mathematics,
-- **WeatherNext 3, arXiv:2609.03582v1**, for selected probabilistic trajectory, multimodal, functional-noise, and forecast-scoring structure.
+- **WeatherNext 3, arXiv:2609.03582v1**, for selected probabilistic trajectory, multimodal, functional-noise, and forecast-scoring structure,
+- **MITgcm** and **Yuta Yaegashi, arXiv:2610.16148v1**, for a C-grid free-surface benchmark and horizontal cut-cell continuity.
 
 The repository is intentionally explicit about scope. It is **not** an Oceananigans port, a complete AC/DC ocean circulation model, a trained WeatherNext implementation, or a formal proof of either paper.
 
@@ -26,6 +27,7 @@ Read:
 - [Category-theory guide](docs/CATEGORY_THEORY.md)
 - [Numerical contract](docs/NUMERICS.md)
 - [Oceananigans reference map](docs/OCEANANIGANS_REFERENCE.md)
+- [MITgcm and horizontal cut cells](docs/MITGCM_CUT_CELLS.md)
 - [Production validation contract](docs/PRODUCTION_READINESS.md)
 
 The equation-to-code mapping is machine-readable in `cutcell/research/references.json`.
@@ -46,6 +48,10 @@ Important distinctions are enforced by tests:
 - pushing a stochastic ensemble through a partition does not imply a closed coarse Markov model;
 - an autonomous coarse stochastic model exists only when the strong-lumpability square `KQ = QKc` holds;
 - stochastic kernels preserve discard, while copy preservation characterizes deterministic behavior in the finite examples.
+
+## MITgcm and horizontal cut cells
+
+The bridge reads native MITgcm MDS geometry and replays the fully implicit linear barotropic stage. The separate oblique-wall experiment adds lateral area fractions and shared face apertures, checks the 2-D conservative coarse-grid chain map, and advances a tracer using the same volume flux. A wet-donor ghost stencil implements the relevant interpolation and reflection from Yaegashi. See the [MITgcm verification case and derivation](docs/MITGCM_CUT_CELLS.md) for the native comparison, the experimental scope, and reproduction commands.
 
 ## WeatherNext 3 structure
 
@@ -232,6 +238,7 @@ Closed unforced diffusion preserves weighted mass, respects the documented bound
 | `cutcell/research/weathernext.py` | Second-order trajectory kernels, functional-noise semantics, multimodal latent diagrams |
 | `cutcell/research/forecast.py` | CRPS, multimodal/global-mean scores, pooled CRPS, conservative stochastic residual example |
 | `cutcell/research/ocean_diagnostics.py` | Korn thin-fluid, variance, physical/compressibility dissipation, mixing diagnostics |
+| `cutcell/research/mitgcm.py` | MITgcm MDS geometry, linear C-grid pressure, shared tracer transport, horizontal cut geometry |
 | `cutcell/research/pressure.py` | Column pressure split, acoustic stage, dispersion |
 | `cutcell/research/transport.py` | Pseudo-density and consistent tracer transport |
 | `cutcell/grid.py`, `operators.py`, `model.py` | Scalar finite-volume runtime |

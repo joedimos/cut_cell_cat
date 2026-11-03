@@ -1,0 +1,46 @@
+# Static, closed, pressure-only barotropic benchmark.
+ &PARM01
+ eosType='LINEAR',
+ tAlpha=0.,
+ sBeta=0.,
+ f0=0.,
+ beta=0.,
+ gravity=9.81,
+ gBaro=9.81,
+ no_slip_sides=.FALSE.,
+ no_slip_bottom=.FALSE.,
+ momAdvection=.FALSE.,
+ momViscosity=.FALSE.,
+ momForcing=.FALSE.,
+ saltStepping=.FALSE.,
+ tempStepping=.FALSE.,
+ implicitFreeSurface=.TRUE.,
+ exactConserv=.TRUE.,
+ implicDiv2Dflow=1.,
+ implicSurfPress=1.,
+ hFacMin=0.,
+ readBinaryPrec=64,
+ writeBinaryPrec=64,
+ globalFiles=.TRUE.,
+ &
+ &PARM02
+ cg2dTargetResidual=1.E-13,
+ cg2dMaxIters=100,
+ &
+ &PARM03
+ nIter0=0,
+ nTimeSteps=5,
+ deltaT=15.,
+ dumpFreq=15.,
+ monitorFreq=15.,
+ &
+ &PARM04
+ usingCartesianGrid=.TRUE.,
+ delX=90., 80., 100., 95., 110., 85., 120., 105.,
+ delY=120., 100., 105., 85., 90., 110., 95.,
+ delR=16.,
+ &
+ &PARM05
+ bathyFile='bathy.bin',
+ pSurfInitFile='eta.bin',
+ &

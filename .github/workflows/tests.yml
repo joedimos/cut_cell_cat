@@ -71,3 +71,24 @@ jobs:
         with:
           name: oceananigans-reference
           path: oceananigans.csv*
+  mitgcm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: MITgcm/MITgcm
+          ref: fef697a599dd2ad9918d2876d17b68764d32f871
+          path: upstream/MITgcm
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: command -v gfortran || (sudo apt-get update && sudo apt-get install -y gfortran)
+      - run: python -m pip install .
+      - run: python validation/compare_mitgcm.py upstream/MITgcm validation/results/mitgcm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mitgcm-reference
+          path: validation/results/mitgcm/report.json

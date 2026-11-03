@@ -1,7 +1,18 @@
 {
-  "schema_version": 3,
-  "reviewed_on": "2026-10-07",
+  "schema_version": 4,
+  "reviewed_on": "2026-11-03",
   "sources": {
+    "mitgcm": {
+      "title": "MIT General Circulation Model",
+      "commit": "fef697a599dd2ad9918d2876d17b68764d32f871",
+      "url": "https://github.com/MITgcm/MITgcm/tree/fef697a599dd2ad9918d2876d17b68764d32f871"
+    },
+    "yaegashi_2026": {
+      "title": "A ghost-cell immersed boundary method for the shallow water equations on Cartesian grids: mass conservation and wetting and drying over variable topography",
+      "author": "Yuta Yaegashi",
+      "arxiv": "2610.16148v1",
+      "url": "https://arxiv.org/html/2610.16148v1"
+    },
     "korn_2026": {
       "title": "Foundations of Global Ocean Climate Modelling at all Scales",
       "author": "Peter Korn",
@@ -20,6 +31,9 @@
     }
   },
   "mapping": [
+    {"source":"mitgcm","locator":"model/src/write_grid.F, integr_continuity.F, calc_div_ghat.F, ini_cg2d.F and solve_for_pressure.F","implementation":"cutcell.research.mitgcm.BarotropicGrid","status":"closed, static, fully implicit linear barotropic C-grid subsystem","validation":"validation/compare_mitgcm.py"},
+    {"source":"yaegashi_2026","locator":"Sections 2.2 and 2.6, equation (18)","implementation":"cutcell.research.mitgcm.half_plane_fractions and BarotropicGrid.step","status":"shared aperture-weighted continuity, applied to an implicit linear C-grid with fixed horizontal geometry","validation":"validation/compare_mitgcm.py oblique case"},
+    {"source":"yaegashi_2026","locator":"Sections 2.3-2.5, equations (6)-(17)","implementation":"cutcell.research.mitgcm.ghost_kernel and reflected_ghost","status":"conditioned wet bilinear donors and slip reflection as standalone primitives","validation":"test_research_mitgcm.GhostTests"},
     {"source":"korn_2026","locator":"Section 2.1-2.2, equations (9)-(14)","implementation":"cutcell.research.ocean_diagnostics.thin_fluid_calibration and cutcell.research.transport.pseudo_density","status":"exact scalar calibration alpha=rho0*g*H, acoustic speed/Froude number, and pseudo-density map; no full momentum system","validation":"test_research_ocean_diagnostics.ThinFluidCalibrationTests"},
     {"source":"korn_2026","locator":"Section 2.2, equations (16)-(21); Section 6.2, (99)-(100)","implementation":"cutcell.research.pressure.ColumnPressureSplit","status":"stationary separable 2-D finite-volume specialization","validation":"test_research_pressure.PressureTests.test_column_and_aggregated_pressure_against_independent_dense_solve"},
     {"source":"korn_2026","locator":"Section 6.2.2, equations (107a)-(107c)","implementation":"cutcell.research.pressure.ColumnPressureSplit.acoustic_stage","status":"linear constant-coefficient explicit S3-b stage, not complete AC/DC","validation":"test_research_pressure.PressureTests.test_acoustic_wave_time_convergence_and_vertical_cfl"},
@@ -37,6 +51,7 @@
     {"source":"weathernext3","locator":"Appendix A.2.2 Pooled CRPS","implementation":"cutcell.research.forecast.pooled_crps","status":"average/max pooling with caller-supplied patch neighborhoods and latitude-like weights; exact WN3 spherical patch construction is not invented by the library","validation":"test_research_weathernext_metrics.PooledCRPSTests"}
   ],
   "categorical_synthesis": [
+    "The MITgcm bridge extends the conservative chain map to a two-dimensional C-grid partition. The oblique benchmark shows nonzero weighted pressure-operator closure defect despite exact conservation under the quotient.",
     "Deterministic conservative ocean updates embed as deterministic morphisms inside the finite Markov category; probabilistic forecasts are stochastic kernels.",
     "WeatherNext 3 equation (3) becomes first-order only after lifting X to the pair-state X x X. The repository now represents this explicitly rather than silently treating WN3 as first-order.",
     "Native-resolution modality maps factor through a shared latent processor object, but that alone does not imply invertibility or exact cross-resolution naturality; both round-trip and naturality defects are explicit diagnostics.",
@@ -46,7 +61,8 @@
     "Pooled CRPS is a statistic after spatial pooling and therefore probes joint/spatial structure that marginal CRPS does not determine; its diagram is distinct from conservation/coarse-graining diagrams."
   ],
   "not_implemented": [
-    "Global spherical ocean dynamics, nonlinear momentum, Coriolis/buoyancy coupling, free-surface evolution, moving vertical coordinates, and the full mimetic C-grid operator set",
+    "Native Fortran immersed-boundary option, dynamic wetting and drying in the pressure solver, and Yaegashi's HLLC/MUSCL shallow-water time integrator and sliver/pool redistribution",
+    "Global spherical ocean dynamics, nonlinear momentum, Coriolis/buoyancy coupling, nonlinear free-surface evolution, moving vertical coordinates, and the full mimetic C-grid operator set",
     "AC/DC option S3-a, complete GCM time stepping, or an end-to-end pseudo-density/velocity/pressure/tracer ocean core",
     "Korn's Section 7-8 telescoping-mesh numerical experiments and reported runtime ratios",
     "Trained WeatherNext 3 GNN/transformer/CNN/MLP architecture, weights, conditional-normalization noise injection, epistemic dropout, raw satellite/station ingestion, training curriculum, operational latency, or forecast-skill reproduction",
